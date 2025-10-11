@@ -13,6 +13,8 @@ export default function Members(){
   const [err, setErr] = useState(null)
   const [qtext, setQtext] = useState("")
   const [busyUid, setBusyUid] = useState(null)
+  const [editingNameId, setEditingNameId] = useState(null)
+  const [nameDraft, setNameDraft] = useState("")
   const isOwner = profile?.role === "owner"
 
   useEffect(() => {
@@ -26,29 +28,29 @@ export default function Members(){
     return unsub
   }, [user])
 
-  // owners count (safety if you also edit roles here)
-  const ownersCount = useMemo(() => rows.filter(r => (r.role || "member") === "owner").length, [rows])
+  const ownersCount = useMemo(
+    () => rows.filter(r => (r.role || "member") === "owner").length,
+    [rows]
+  )
 
   const filtered = useMemo(() => {
     const q = qtext.trim().toLowerCase()
     if (!q) return rows
     return rows.filter(r => {
       const name = (r.displayName || "").toLowerCase()
-      const email = (r.email || "").toLowerCase()
       const role = (r.role || "member").toLowerCase()
       const tier = (r.tier || "committed").toLowerCase()
-      return name.includes(q) || email.includes(q) || role.includes(q) || tier.includes(q)
+      return name.includes(q) || role.includes(q) || tier.includes(q)
     })
   }, [rows, qtext])
 
+  // ---- Mutations ----
   async function updateRole(targetUid, nextRole){
     if (!isOwner) return
     const current = rows.find(r => r.id === targetUid)
     if (!current) return
     const prevRole = current.role || "member"
     if (prevRole === nextRole) return
-
-    // Prevent removing the last owner
     if (prevRole === "owner" && nextRole !== "owner" && ownersCount === 1) {
       alert("You are the last owner. Add another owner before demoting.")
       return
@@ -56,12 +58,10 @@ export default function Members(){
     if (targetUid === user.uid && prevRole === "owner" && nextRole !== "owner") {
       if (!confirm("You’re changing your own role from OWNER. Continue?")) return
     }
-
     try {
       setBusyUid(targetUid)
       await setDoc(doc(db, "profiles", targetUid), { role: nextRole }, { merge: true })
     } catch (e) {
-      console.error("updateRole error:", e)
       alert(`Failed to update role: ${e.code || e.message}`)
     } finally {
       setBusyUid(null)
@@ -76,13 +76,39 @@ export default function Members(){
       setBusyUid(targetUid)
       await setDoc(doc(db, "profiles", targetUid), { tier: nextTier }, { merge: true })
     } catch (e) {
-      console.error("updateTier error:", e)
       alert(`Failed to update tier: ${e.code || e.message}`)
     } finally {
       setBusyUid(null)
     }
   }
 
+  function startNameEdit(row){
+    if (!isOwner) return
+    setEditingNameId(row.id)
+    setNameDraft(row.displayName || "")
+  }
+
+  async function saveName(targetUid){
+    const next = nameDraft.trim()
+    if (!next) { alert("Name cannot be empty."); return }
+    try {
+      setBusyUid(targetUid)
+      await setDoc(doc(db, "profiles", targetUid), { displayName: next }, { merge: true })
+      setEditingNameId(null)
+      setNameDraft("")
+    } catch (e) {
+      alert(`Failed to update name: ${e.code || e.message}`)
+    } finally {
+      setBusyUid(null)
+    }
+  }
+
+  function cancelName(){
+    setEditingNameId(null)
+    setNameDraft("")
+  }
+
+  // ---- Render ----
   return (
     <div className="container vstack">
       <div className="card vstack">
@@ -93,16 +119,16 @@ export default function Members(){
             <span className="badge">Owners: <b>{ownersCount}</b></span>
           </div>
           <input
-            placeholder="Search name, email, role, tier"
+            placeholder="Search name, role, tier"
             value={qtext}
             onChange={e=>setQtext(e.target.value)}
             style={{background:"#0b1426", color:"#e5e7eb", border:"1px solid #1f2937",
-                    borderRadius:10, padding:"8px 10px", minWidth:260}}
+                    borderRadius:10, padding:"8px 10px", minWidth:240}}
           />
         </div>
         {!isOwner && (
           <p style={{color:"#9ca3af", margin:0, fontSize:13}}>
-            All signed-in users can view everyone. Only <b>owner</b> can change roles & tiers.
+            All signed-in users can view everyone. Only <b>owner</b> can change names, roles & tiers.
           </p>
         )}
       </div>
@@ -118,10 +144,8 @@ export default function Members(){
           <thead>
             <tr style={{background:"#0f1a30"}}>
               <th style={th}>Name</th>
-              <th style={th}>Email</th>
               <th style={th}>Role</th>
               <th style={th}>Tier</th>
-              <th style={th}>UID</th>
               {isOwner ? <th style={th}></th> : null}
             </tr>
           </thead>
@@ -129,10 +153,37 @@ export default function Members(){
             {filtered.map(r => {
               const role = r.role || "member"
               const tier = r.tier || "committed"
+              const isEditing = editingNameId === r.id
               return (
                 <tr key={r.id} style={{borderTop:"1px solid #1f2937"}}>
-                  <td style={td}>{r.displayName || "—"}</td>
-                  <td style={td}>{r.email || "—"}</td>
+                  {/* Name cell (owner can edit) */}
+                  <td style={td}>
+                    {!isOwner ? (
+                      <span>{r.displayName || "—"}</span>
+                    ) : !isEditing ? (
+                      <div className="hstack" style={{gap:8}}>
+                        <span>{r.displayName || "—"}</span>
+                        <button className="btn ghost" onClick={()=>startNameEdit(r)}>Edit</button>
+                      </div>
+                    ) : (
+                      <div className="hstack" style={{gap:8}}>
+                        <input
+                          value={nameDraft}
+                          onChange={e=>setNameDraft(e.target.value)}
+                          placeholder="Member name"
+                          style={{
+                            background:"#0b1426", color:"#e5e7eb",
+                            border:"1px solid #1f2937", borderRadius:8,
+                            padding:"6px 8px", minWidth:220
+                          }}
+                        />
+                        <button className="btn primary" onClick={()=>saveName(r.id)} disabled={busyUid===r.id}>
+                          Save
+                        </button>
+                        <button className="btn" onClick={cancelName}>Cancel</button>
+                      </div>
+                    )}
+                  </td>
 
                   {/* Role cell */}
                   <td style={td}>
@@ -166,7 +217,6 @@ export default function Members(){
                     )}
                   </td>
 
-                  <td style={{...td, fontSize:12, color:"#9ca3af"}}>{r.id}</td>
                   {isOwner ? (
                     <td style={td}>
                       {busyUid === r.id ? <span className="badge">Saving…</span> : null}
@@ -176,7 +226,7 @@ export default function Members(){
               )
             })}
             {filtered.length === 0 && (
-              <tr><td style={{...td, color:"#9ca3af"}} colSpan={isOwner ? 6 : 5}>No matches.</td></tr>
+              <tr><td style={{...td, color:"#9ca3af"}} colSpan={isOwner ? 4 : 3}>No matches.</td></tr>
             )}
           </tbody>
         </table>
