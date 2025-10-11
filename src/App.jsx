@@ -10,8 +10,9 @@ import NotFound from "./components/NotFound"
 import Home from "./pages/Home"
 import Login from "./pages/Login"
 import Log from "./pages/Log"
-import Members from "./pages/Members"       // owner can edit roles inline here
-import MyProfile from "./pages/MyProfile"   // lets you edit your name + (if allowed) role
+import Members from "./pages/Members"
+import MyProfile from "./pages/MyProfile"
+import Standards from "./pages/Standards"
 import Diag from "./pages/Diag"
 
 export default function App(){
@@ -46,6 +47,14 @@ export default function App(){
             element={
               <ProtectedRoute>
                 <MyProfile />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/standards"
+            element={
+              <ProtectedRoute>
+                <Standards />
               </ProtectedRoute>
             }
           />
