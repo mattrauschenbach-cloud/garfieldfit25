@@ -14,6 +14,7 @@ export default function NavBar(){
         <NavLink to="/log" className={link}>Log</NavLink>
         <NavLink to="/members" className={link}>Members</NavLink>
         <NavLink to="/standards" className={link}>Standards</NavLink>
+        <NavLink to="/checkoffs" className={link}>Checkoffs</NavLink>
         <NavLink to="/me" className={link}>My Profile</NavLink>
         <NavLink to="/diag" className={link}>Diag</NavLink>
 
