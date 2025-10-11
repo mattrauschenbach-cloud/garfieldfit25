@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { useAuth } from "../lib/auth"
+import useAuth from "../lib/auth"
 import { db } from "../lib/firebase"
 import { collection, getCountFromServer } from "firebase/firestore"
 import AccessDenied from "../components/AccessDenied"
