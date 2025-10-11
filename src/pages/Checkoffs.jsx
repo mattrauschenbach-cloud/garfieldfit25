@@ -9,6 +9,27 @@ import {
 
 const TIERS = ["committed", "developmental", "advanced", "elite"]
 
+// simple progress bar
+function ProgressBar({ value = 0, max = 1, label }) {
+  const pct = max > 0 ? Math.round((value / max) * 100) : 0
+  return (
+    <div className="vstack" style={{gap:6, minWidth:240}}>
+      {label && <div className="hstack" style={{justifyContent:"space-between"}}>
+        <span style={{color:"#9ca3af"}}>{label}</span>
+        <span style={{color:"#9ca3af"}}>{value}/{max} ({pct}%)</span>
+      </div>}
+      <div style={{
+        height:10, borderRadius:999, background:"#111827", border:"1px solid #1f2937", overflow:"hidden"
+      }}>
+        <div style={{
+          width: `${pct}%`, height:"100%", borderRadius:999,
+          background: "linear-gradient(90deg, #2563eb, #22d3ee)"
+        }}/>
+      </div>
+    </div>
+  )
+}
+
 export default function Checkoffs(){
   const { user, profile } = useAuth()
   const isMentor = ["mentor","admin","owner"].includes(profile?.role || "member")
@@ -69,6 +90,7 @@ export default function Checkoffs(){
     return unsub
   }, [targetUid])
 
+  // visible list for the table (respects filters)
   const filtered = useMemo(() => {
     const ql = q.trim().toLowerCase()
     return standards
@@ -79,6 +101,32 @@ export default function Checkoffs(){
         (s.category || "").toLowerCase().includes(ql)
       )
   }, [standards, tierFilter, q])
+
+  // progress math (always uses ALL active standards, not just filtered)
+  const activeByTier = useMemo(() => {
+    const obj = Object.fromEntries(TIERS.map(t => [t, []]))
+    standards.forEach(s => {
+      if (s.active === false) return
+      const t = s.tier || "committed"
+      if (!obj[t]) obj[t] = []
+      obj[t].push(s)
+    })
+    return obj
+  }, [standards])
+
+  const progress = useMemo(() => {
+    const tierStats = {}
+    let totalMax = 0, totalVal = 0
+    for (const t of TIERS) {
+      const list = activeByTier[t] || []
+      const max = list.length
+      const val = list.reduce((a, s) => a + (checks[s.id] ? 1 : 0), 0)
+      tierStats[t] = { val, max }
+      totalMax += max
+      totalVal += val
+    }
+    return { tierStats, total: { val: totalVal, max: totalMax } }
+  }, [activeByTier, checks])
 
   const doneCount = filtered.reduce((a, s) => a + (checks[s.id] ? 1 : 0), 0)
 
@@ -97,11 +145,12 @@ export default function Checkoffs(){
 
   return (
     <div className="container vstack">
+      {/* Header & controls */}
       <div className="card vstack">
         <div className="hstack" style={{justifyContent:"space-between", gap:12, flexWrap:"wrap"}}>
           <div className="hstack" style={{gap:8, flexWrap:"wrap"}}>
             <span className="badge">Checkoffs</span>
-            <span className="badge">Completed: <b>{doneCount}</b>/<b>{filtered.length}</b></span>
+            <span className="badge">Visible done: <b>{doneCount}</b>/<b>{filtered.length}</b></span>
           </div>
           <div className="hstack" style={{gap:8, flexWrap:"wrap"}}>
             <input
@@ -128,8 +177,24 @@ export default function Checkoffs(){
             )}
           </div>
         </div>
+
+        {/* Progress bars */}
+        <div className="vstack" style={{gap:10, marginTop:10}}>
+          <ProgressBar value={progress.total.val} max={progress.total.max} label="Overall progress" />
+          <div className="hstack" style={{gap:16, flexWrap:"wrap"}}>
+            {TIERS.map(t => (
+              <ProgressBar
+                key={t}
+                value={progress.tierStats[t]?.val || 0}
+                max={progress.tierStats[t]?.max || 0}
+                label={`${t} tier`}
+              />
+            ))}
+          </div>
+        </div>
+
         {!isMentor && (
-          <p style={{color:"#9ca3af", margin:0, fontSize:13}}>
+          <p style={{color:"#9ca3af", margin:0, fontSize:13, marginTop:6}}>
             You’re viewing your own checkoffs.
           </p>
         )}
@@ -141,6 +206,7 @@ export default function Checkoffs(){
         </div>
       )}
 
+      {/* List */}
       <div className="card vstack">
         {filtered.length === 0 ? (
           <p style={{color:"#9ca3af"}}>No standards yet.</p>
