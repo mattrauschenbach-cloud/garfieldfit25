@@ -1,300 +1,214 @@
 // src/pages/Standards.jsx
-import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
-import { auth, db } from '../lib/firebase'
+import { useEffect, useMemo, useState } from "react"
+import useAuth from "../lib/auth"
+import { db } from "../lib/firebase"
 import {
-  addDoc, collection, doc, getDoc, getDocs,
-  onSnapshot, orderBy, query, serverTimestamp
-} from 'firebase/firestore'
+  addDoc, collection, deleteDoc, doc, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc
+} from "firebase/firestore"
 
-// Fallback data if Firestore is empty or blocked
-const FALLBACK = {
-  committed: [
-    { id: 'c1', title: '1.5 Mile Run', detail: '13:15 or less', order: 1 },
-    { id: 'c2', title: 'Push-ups',     detail: '40 reps unbroken', order: 2 },
-    { id: 'c3', title: 'Air Squats',   detail: '75 reps unbroken', order: 3 },
-  ],
-  developed: [
-    { id: 'd1', title: '1.5 Mile Run', detail: '12:00 or less', order: 1 },
-    { id: 'd2', title: 'Push-ups',     detail: '60 reps unbroken', order: 2 },
-    { id: 'd3', title: 'Sit-ups',      detail: '75 reps unbroken', order: 3 },
-  ],
-  advanced: [
-    { id: 'a1', title: '1.5 Mile Run', detail: '10:30 or less', order: 1 },
-    { id: 'a2', title: 'Push-ups',     detail: '80 reps unbroken', order: 2 },
-    { id: 'a3', title: 'Pull-ups',     detail: '15 reps strict', order: 3 },
-  ],
-  elite: [
-    { id: 'e1', title: '1.5 Mile Run', detail: '9:30 or less', order: 1 },
-    { id: 'e2', title: 'Push-ups',     detail: '100 reps unbroken', order: 2 },
-    { id: 'e3', title: 'Burpees',      detail: '50 reps unbroken', order: 3 },
-  ],
-}
+const TIERS = ["committed", "developmental", "advanced", "elite"]
 
-const TIERS = [
-  { value: 'committed', label: 'Committed' },
-  { value: 'developed', label: 'Developed' },
-  { value: 'advanced',  label: 'Advanced'  },
-  { value: 'elite',     label: 'Elite'     },
-]
+export default function Standards(){
+  const { profile } = useAuth()
+  const isMentor = ["mentor","admin","owner"].includes(profile?.role || "member")
 
-function labelFor(v) {
-  if (v === 'committed') return 'Committed'
-  if (v === 'developed') return 'Developed'
-  if (v === 'advanced')  return 'Advanced'
-  if (v === 'elite')     return 'Elite'
-  return v
-}
+  const [rows, setRows] = useState([])
+  const [err, setErr] = useState(null)
 
-export default function Standards() {
-  const [me, setMe] = useState(() => auth.currentUser)
-  const [role, setRole] = useState('member')
-  const isMentor = role === 'mentor' || role === 'admin'
+  // new standard form
+  const [title, setTitle]   = useState("")
+  const [tier, setTier]     = useState("committed")
+  const [category, setCategory] = useState("")
+  const [busy, setBusy] = useState(false)
 
-  const [tier, setTier] = useState('committed')
-  const [search, setSearch] = useState('')
-  const [groups, setGroups] = useState(FALLBACK)   // { committed:[], developed:[], advanced:[], elite:[] }
-  const [loading, setLoading] = useState(true)
-  const [usingFallback, setUsingFallback] = useState(false)
-  const [seeding, setSeeding] = useState(false)
-
-  // auth + role
   useEffect(() => {
-    const unsub = auth.onAuthStateChanged(async (u) => {
-      setMe(u)
-      if (!u?.uid) { setRole('member'); return }
-      try {
-        const snap = await getDoc(doc(db, 'profiles', u.uid))
-        setRole((snap.exists() ? snap.data()?.role : 'member') || 'member')
-      } catch { setRole('member') }
-    })
-    return () => unsub()
+    const q = query(collection(db, "standards"), orderBy("tier"), orderBy("title"))
+    const unsub = onSnapshot(q,
+      snap => setRows(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
+      e => setErr(e)
+    )
+    return unsub
   }, [])
 
-  // live load standards; fall back if empty/blocked
-  useEffect(() => {
-    const col = collection(db, 'standards')
-    let unsub
-    setLoading(true)
-    setUsingFallback(false)
+  const completedCount = useMemo(() => rows.filter(r => r.active !== false).length, [rows])
 
+  async function addStandard(e){
+    e.preventDefault()
+    if (!isMentor || !title.trim()) return
     try {
-      const qy = query(col, orderBy('tier', 'asc'), orderBy('order', 'asc'))
-      unsub = onSnapshot(
-        qy,
-        (snap) => {
-          const byTier = { committed: [], developed: [], advanced: [], elite: [] }
-          snap.forEach((d) => {
-            const s = d.data() || {}
-            const t = s.tier || 'committed'
-            const item = {
-              id: d.id,
-              title: s.title || 'Untitled Standard',
-              detail: s.detail || '',
-              order: Number(s.order ?? 0),
-            }
-            if (!byTier[t]) byTier[t] = []
-            byTier[t].push(item)
-          })
-
-          // if the whole collection is empty, use fallback
-          const emptyAll = Object.values(byTier).every(list => list.length === 0)
-          if (emptyAll) {
-            setGroups(FALLBACK)
-            setUsingFallback(true)
-          } else {
-            // ensure per-tier sort
-            Object.keys(byTier).forEach(k => {
-              byTier[k].sort((a, b) => (a.order - b.order) || a.title.localeCompare(b.title))
-            })
-            setGroups(byTier)
-            setUsingFallback(false)
-          }
-          setLoading(false)
-        },
-        async () => {
-          // one-time read fallback
-          try {
-            const snap = await getDocs(col)
-            if (snap.empty) {
-              setGroups(FALLBACK)
-              setUsingFallback(true)
-            } else {
-              const byTier = { committed: [], developed: [], advanced: [], elite: [] }
-              snap.forEach((d) => {
-                const s = d.data() || {}
-                const t = s.tier || 'committed'
-                const item = {
-                  id: d.id,
-                  title: s.title || 'Untitled Standard',
-                  detail: s.detail || '',
-                  order: Number(s.order ?? 0),
-                }
-                if (!byTier[t]) byTier[t] = []
-                byTier[t].push(item)
-              })
-              Object.keys(byTier).forEach(k => {
-                byTier[k].sort((a, b) => (a.order - b.order) || a.title.localeCompare(b.title))
-              })
-              setGroups(byTier)
-              setUsingFallback(false)
-            }
-          } catch {
-            setGroups(FALLBACK)
-            setUsingFallback(true)
-          } finally {
-            setLoading(false)
-          }
-        }
-      )
-    } catch {
-      setGroups(FALLBACK)
-      setUsingFallback(true)
-      setLoading(false)
-    }
-
-    return () => { if (unsub) unsub() }
-  }, [])
-
-  // Seed fallback into Firestore
-  async function seedToFirestore() {
-    if (!isMentor) return alert('Mentor/admin only.')
-    const col = collection(db, 'standards')
-
-    try {
-      setSeeding(true)
-
-      // if there are any docs already, confirm
-      const existing = await getDocs(col)
-      if (!existing.empty) {
-        const ok = confirm('Standards collection is not empty. Add fallback items anyway?')
-        if (!ok) { setSeeding(false); return }
-      }
-
-      // write in deterministic order
-      for (const t of Object.keys(FALLBACK)) {
-        for (const item of FALLBACK[t]) {
-          await addDoc(col, {
-            tier: t,
-            title: item.title,
-            detail: item.detail || '',
-            order: Number(item.order ?? 0),
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-          })
-        }
-      }
-
-      alert('Fallback standards imported to Firestore ✅')
-      setUsingFallback(false) // live listener will refresh the list
+      setBusy(true)
+      await addDoc(collection(db, "standards"), {
+        title: title.trim(),
+        tier,
+        category: category.trim() || null,
+        active: true,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      })
+      setTitle(""); setCategory(""); setTier("committed")
     } catch (e) {
-      console.error(e)
-      alert('Import failed. Check Firestore rules and network.')
-    } finally {
-      setSeeding(false)
-    }
+      alert(`Add failed: ${e.code || e.message}`)
+    } finally { setBusy(false) }
   }
 
-  const list = groups[tier] || []
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    if (!q) return list
-    return list.filter((s) =>
-      (s.title || '').toLowerCase().includes(q) ||
-      (s.detail || '').toLowerCase().includes(q)
-    )
-  }, [list, search])
+  async function saveRow(r){
+    if (!isMentor) return
+    try{
+      setBusy(r.id)
+      await updateDoc(doc(db, "standards", r.id), {
+        title: r._editTitle ?? r.title,
+        tier: r._editTier ?? r.tier,
+        category: (r._editCategory ?? r.category) || null,
+        updatedAt: serverTimestamp(),
+      })
+    }catch(e){ alert(`Save failed: ${e.code || e.message}`) }
+    finally{ setBusy(null) }
+  }
 
-  const tierLabel = labelFor(tier)
+  async function toggleActive(id, active){
+    if (!isMentor) return
+    try{
+      setBusy(id)
+      await setDoc(doc(db, "standards", id), { active }, { merge: true })
+    }catch(e){ alert(`Update failed: ${e.code || e.message}`) }
+    finally{ setBusy(null) }
+  }
+
+  async function removeRow(id){
+    if (!isMentor) return
+    if (!confirm("Delete this standard? (Users’ checkoffs for it will remain orphaned)")) return
+    try{
+      setBusy(id)
+      await deleteDoc(doc(db, "standards", id))
+    }catch(e){ alert(`Delete failed: ${e.code || e.message}`) }
+    finally{ setBusy(null) }
+  }
+
+  // local edit helpers
+  function setLocal(id, patch){
+    setRows(curr => curr.map(r => r.id === id ? ({ ...r, ...patch }) : r))
+  }
 
   return (
-    <section className="stack" style={{ gap: 16 }}>
-      <header className="card pad">
-        <div className="row between center">
-          <div>
-            <h1 className="title">Fitness Standards</h1>
-            <div className="sub">
-              Choose a tier to view standards separately.
-              {usingFallback && (
-                <span className="badge role" style={{ marginLeft: 8 }}>
-                  Using fallback data
-                </span>
-              )}
-            </div>
-          </div>
-          <span className="badge shift">{tierLabel}</span>
-        </div>
-      </header>
-
-      {/* Filters + actions */}
-      <div className="card pad">
-        <div className="grid2" style={{ gap: 12 }}>
-          <div>
-            <label className="label">Tier</label>
-            <select className="input" value={tier} onChange={(e) => setTier(e.target.value)}>
-              {TIERS.map((t) => (
-                <option key={t.value} value={t.value}>{t.label}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="label">Search (title or detail)</label>
-            <input
-              className="input"
-              placeholder="Type to filter…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
+    <div className="container vstack">
+      <div className="card vstack">
+        <div className="hstack" style={{justifyContent:"space-between", gap:12}}>
+          <div className="hstack" style={{gap:8, flexWrap:"wrap"}}>
+            <span className="badge">Standards</span>
+            <span className="badge">Active: <b>{completedCount}</b></span>
           </div>
         </div>
-
-        {/* Jump to Tier Checkoff with the current tier */}
-        <div className="row" style={{ justifyContent:'space-between', marginTop: 12, gap: 8, flexWrap:'wrap' }}>
-          <Link
-            to={`/tier-checkoff?tier=${encodeURIComponent(tier)}`}
-            className="btn"
-            style={{ textDecoration:'none' }}
-            title="Open Tier Checkoff with this tier selected"
-          >
-            Open Tier Checkoff →
-          </Link>
-
-          {/* Mentor-only import button when using fallback */}
-          {isMentor && usingFallback && (
-            <button
-              className="btn primary"
-              onClick={seedToFirestore}
-              disabled={seeding}
-              title="Create Firestore documents from the fallback list"
-            >
-              {seeding ? 'Importing…' : 'Import fallback to Firestore'}
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Results */}
-      <div className="stack" style={{ gap: 12 }}>
-        {loading ? (
-          <div className="card pad muted">Loading standards…</div>
-        ) : filtered.length === 0 ? (
-          <div className="card pad muted">No standards found for this tier.</div>
-        ) : (
-          filtered.map((s) => (
-            <div key={s.id} className="card pad">
-              <div className="row between center">
-                <div className="title">{s.title}</div>
-                <span className="badge shift">{tierLabel}</span>
-              </div>
-              {s.detail && <div className="sub" style={{ marginTop: 6 }}>{s.detail}</div>}
-            </div>
-          ))
+        {!isMentor && (
+          <p style={{color:"#9ca3af", margin:0, fontSize:13}}>
+            Only mentors/admins/owners can add or edit standards.
+          </p>
         )}
       </div>
 
-      <div className="muted" style={{ fontSize: 12 }}>
-        Source: <code>standards</code> (Firestore). {usingFallback ? 'Currently showing local fallback until you import.' : 'Loaded from Firestore.'}
+      {isMentor && (
+        <div className="card vstack">
+          <span className="badge">Add standard</span>
+          <form onSubmit={addStandard} className="hstack" style={{gap:8, flexWrap:"wrap"}}>
+            <input
+              placeholder="Title (required)"
+              value={title}
+              onChange={e=>setTitle(e.target.value)}
+              style={input}
+            />
+            <select value={tier} onChange={e=>setTier(e.target.value)} style={select}>
+              {TIERS.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+            <input
+              placeholder="Category (optional)"
+              value={category}
+              onChange={e=>setCategory(e.target.value)}
+              style={input}
+            />
+            <button className="btn primary" disabled={!title.trim() || !!busy}>
+              {busy ? "Saving…" : "Add"}
+            </button>
+          </form>
+        </div>
+      )}
+
+      {err && (
+        <div className="card" style={{borderColor:"#7f1d1d", background:"#1f1315", color:"#fecaca"}}>
+          Error: {String(err.message || err)}
+        </div>
+      )}
+
+      <div className="card" style={{padding:0, overflowX:"auto"}}>
+        <table style={{width:"100%", borderCollapse:"collapse"}}>
+          <thead>
+            <tr style={{background:"#0f1a30"}}>
+              <th style={th}>Title</th>
+              <th style={th}>Tier</th>
+              <th style={th}>Category</th>
+              <th style={th}>Active</th>
+              {isMentor ? <th style={th}></th> : null}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(r => {
+              const edit = {
+                title:   r._editTitle   ?? r.title,
+                tier:    r._editTier    ?? r.tier,
+                category:r._editCategory?? r.category || ""
+              }
+              return (
+                <tr key={r.id} style={{borderTop:"1px solid #1f2937"}}>
+                  <td style={td}>
+                    {!isMentor ? r.title : (
+                      <input value={edit.title} onChange={e=>setLocal(r.id, {_editTitle:e.target.value})} style={input} />
+                    )}
+                  </td>
+                  <td style={td}>
+                    {!isMentor ? <span className="badge">{r.tier}</span> : (
+                      <select value={edit.tier} onChange={e=>setLocal(r.id, {_editTier:e.target.value})} style={select}>
+                        {TIERS.map(t => <option key={t} value={t}>{t}</option>)}
+                      </select>
+                    )}
+                  </td>
+                  <td style={td}>
+                    {!isMentor ? (r.category || "—") : (
+                      <input value={edit.category} onChange={e=>setLocal(r.id, {_editCategory:e.target.value})} style={input} />
+                    )}
+                  </td>
+                  <td style={td}>
+                    {!isMentor ? (
+                      <span className="badge">{r.active === false ? "inactive" : "active"}</span>
+                    ) : (
+                      <label className="hstack" style={{gap:8}}>
+                        <input
+                          type="checkbox"
+                          checked={r.active !== false}
+                          onChange={e=>toggleActive(r.id, e.target.checked)}
+                          disabled={busy === r.id}
+                        />
+                        <span>{r.active !== false ? "Active" : "Inactive"}</span>
+                      </label>
+                    )}
+                  </td>
+                  {isMentor ? (
+                    <td style={td} className="hstack" >
+                      <button className="btn primary" disabled={busy===r.id} onClick={()=>saveRow(r)}>Save</button>
+                      <button className="btn" disabled={busy===r.id} onClick={()=>removeRow(r.id)}>Delete</button>
+                    </td>
+                  ) : null}
+                </tr>
+              )
+            })}
+            {rows.length === 0 && (
+              <tr><td style={{...td, color:"#9ca3af"}} colSpan={isMentor?5:4}>No standards yet.</td></tr>
+            )}
+          </tbody>
+        </table>
       </div>
-    </section>
+    </div>
   )
 }
+
+const th = { textAlign:"left", padding:"10px 12px", fontSize:12, color:"#9ca3af" }
+const td = { padding:"12px" }
+const input = { background:"#0b1426", color:"#e5e7eb", border:"1px solid #1f2937", borderRadius:8, padding:"6px 8px", minWidth:180 }
+const select = { ...input }
