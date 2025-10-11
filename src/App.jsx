@@ -1,114 +1,61 @@
 // src/App.jsx
-import { Suspense, lazy } from "react"
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom"
-
 import AppShell from "./components/AppShell"
 import ProtectedRoute from "./components/ProtectedRoute"
 import MentorRoute from "./components/MentorRoute"
 import NotFound from "./components/NotFound"
+import { ROUTES } from "./routes"
 
-// Lazy-loaded pages
-const Home = lazy(() => import("./pages/Home"))
-const Login = lazy(() => import("./pages/Login"))
-const Members = lazy(() => import("./pages/Members"))
-const MonthlyChallenge = lazy(() => import("./pages/MonthlyChallenge"))
-const MonthlyAdmin = lazy(() => import("./pages/MonthlyAdmin"))
-const AdminStandards = lazy(() => import("./pages/AdminStandards"))
-const Diag = lazy(() => import("./pages/Diag"))
+// Pages (non-lazy to stabilize)
+import Home from "./pages/Home"
+import Login from "./pages/Login"
+import Members from "./pages/Members"
+import MonthlyChallenge from "./pages/MonthlyChallenge"
+import MonthlyAdmin from "./pages/MonthlyAdmin"
+import AdminStandards from "./pages/AdminStandards"
+import Diag from "./pages/Diag"
+import OwnerDashboard from "./pages/OwnerDashboard"
+import OwnerMembers from "./pages/OwnerMembers"
 
-// Owner (optional but recommended)
-const OwnerDashboard = lazy(() => import("./pages/OwnerDashboard"))
-const OwnerMembers = lazy(() => import("./pages/OwnerMembers"))
+// Optional extras — safe if missing: just comment out the routes if you don’t have them
+// import Ping from "./pages/Ping"
+// import PermTest from "./pages/PermTest"
 
-// Optional extra demo/debug pages if they exist in your repo
-const Ping = lazy(() => import("./pages/Ping").catch(() => ({ default: () => null })))
-const PermTest = lazy(() => import("./pages/PermTest").catch(() => ({ default: () => null })))
-
-function Loader() {
-  return (
-    <div className="container">
-      <div className="card">Loading…</div>
-    </div>
-  )
-}
+function RouteGuard({ children }) { return <ProtectedRoute>{children}</ProtectedRoute> }
+function MentorGuard({ children }) { return <MentorRoute>{children}</MentorRoute> }
 
 export default function App() {
   return (
     <BrowserRouter>
       <AppShell>
-        <Suspense fallback={<Loader />}>
-          <Routes>
-            {/* Public */}
-            <Route path="/" element={<Home />} />
-            <Route path="/login" element={<Login />} />
-            <Route path="/diag" element={<Diag />} />
+        <Routes>
+          {/* Public */}
+          <Route path="/" element={<Home />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/diag" element={<Diag />} />
 
-            {/* Member-protected */}
-            <Route
-              path="/members"
-              element={
-                <ProtectedRoute>
-                  <Members />
-                </ProtectedRoute>
-              }
-            />
+          {/* Member-protected */}
+          <Route path="/members" element={<RouteGuard><Members /></RouteGuard>} />
+          <Route path="/monthly" element={<RouteGuard><MonthlyChallenge /></RouteGuard>} />
 
-            <Route
-              path="/monthly"
-              element={
-                <ProtectedRoute>
-                  <MonthlyChallenge />
-                </ProtectedRoute>
-              }
-            />
+          {/* Mentor/Admin/Owner */}
+          <Route path="/monthly-admin" element={<MentorGuard><MonthlyAdmin /></MentorGuard>} />
+          <Route path="/admin-standards" element={<MentorGuard><AdminStandards /></MentorGuard>} />
 
-            {/* Mentor/Admin/Owner */}
-            <Route
-              path="/monthly-admin"
-              element={
-                <MentorRoute>
-                  <MonthlyAdmin />
-                </MentorRoute>
-              }
-            />
-            <Route
-              path="/admin-standards"
-              element={
-                <MentorRoute>
-                  <AdminStandards />
-                </MentorRoute>
-              }
-            />
+          {/* Owner */}
+          <Route path="/owner" element={<RouteGuard><OwnerDashboard /></RouteGuard>} />
+          <Route path="/owner/members" element={<RouteGuard><OwnerMembers /></RouteGuard>} />
 
-            {/* Owner */}
-            <Route
-              path="/owner"
-              element={
-                <ProtectedRoute>
-                  <OwnerDashboard />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/owner/members"
-              element={
-                <ProtectedRoute>
-                  <OwnerMembers />
-                </ProtectedRoute>
-              }
-            />
+          {/* Optional extras */}
+          {/* <Route path="/ping" element={<Ping />} /> */}
+          {/* <Route path="/permtest" element={<PermTest />} /> */}
 
-            {/* Optional extras (safe to leave; render nothing if not present) */}
-            <Route path="/ping" element={<Ping />} />
-            <Route path="/permtest" element={<PermTest />} />
+          {/* Redirects */}
+          <Route path="/home" element={<Navigate to="/" replace />} />
 
-            {/* Redirects */}
-            <Route path="/home" element={<Navigate to="/" replace />} />
-
-            {/* 404 */}
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </Suspense>
+          {/* 404 */}
+          <Route path="*" element={<NotFound />} />
+        </Routes>
       </AppShell>
     </BrowserRouter>
   )
