@@ -1,0 +1,152 @@
+/* src/index.css */
+:root{
+  --bg:#0b1220;        /* app frame */
+  --panel:#0f172a;     /* header/footer */
+  --card:#ffffff;      /* content cards */
+  --muted:#6b7280;
+  --text:#0f172a;
+  --brand:#2563eb;
+  --brand-press:#1e40af;
+  --ring: rgba(37,99,235,.35);
+}
+
+html,body,#root{height:100%}
+html,body{margin:0;padding:0;background:var(--bg);-webkit-font-smoothing:antialiased}
+*{box-sizing:border-box}
+
+.app-wrap{min-height:100%;display:flex;flex-direction:column;background:var(--bg)}
+.app-header{
+  position:sticky;top:0;z-index:20;background:var(--panel);color:#fff;
+  display:flex;align-items:center;justify-content:space-between; /* room for title + actions */
+  height:56px;font-weight:800;letter-spacing:.2px
+}
+.app-main{
+  flex:1; background:#f6f8fc; border-top-left-radius:16px; border-top-right-radius:16px;
+  padding:12px 12px 80px; /* bottom space for tabbar */
+}
+.app-tabbar{
+  position:fixed;bottom:0;left:0;right:0;height:64px;background:var(--panel);color:#fff;
+  display:flex;align-items:center;justify-content:space-around;gap:4px;border-top:1px solid #0b1220
+}
+
+/* Cards & layout primitives */
+.card{background:var(--card);border:1px solid #e5e7eb;border-radius:14px;box-shadow:0 1px 2px rgba(10,10,20,.05)}
+.card.pad{padding:14px}
+.hstack{display:flex;align-items:center;gap:8px}
+.vstack{display:flex;flex-direction:column;gap:8px}
+.stack{display:flex;flex-direction:column}
+.row{display:flex}
+.center{align-items:center}
+.between{justify-content:space-between}
+.right{text-align:right}
+.grow{flex:1}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace}
+.muted{color:var(--muted)}
+.title{font-size:18px;font-weight:800;color:var(--text)}
+.sub{font-size:12px;color:var(--muted)}
+
+/* Buttons */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  padding:12px 14px;border-radius:12px;border:1px solid #e5e7eb;background:#fff;color:#111;
+  font-weight:600;font-size:16px;line-height:1; text-decoration:none; cursor:pointer;
+}
+.btn:active{transform:translateY(1px)}
+.btn.primary{background:var(--brand);border-color:var(--brand);color:#fff}
+.btn.primary:active{background:var(--brand-press);border-color:var(--brand-press)}
+.btn.ghost{background:transparent;border-color:rgba(255,255,255,.2);color:#fff}
+.btn.danger{background:#ef4444;border-color:#ef4444;color:#fff}
+
+/* Inputs */
+input,select,textarea{
+  width:100%;padding:12px 12px;border-radius:12px;border:1px solid #e5e7eb;background:#fff;font-size:16px;
+  outline:none
+}
+input:focus,select:focus,textarea:focus{box-shadow:0 0 0 4px var(--ring)}
+.label{font-weight:700;font-size:13px;color:#374151;margin-bottom:6px}
+
+/* Badges */
+.badge{display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border-radius:999px;font-weight:700;font-size:12px}
+.badge.shift{background:#eef2ff;color:#3730a3}
+.badge.role{background:#dcfce7;color:#166534}
+
+/* Simple table-ish layout */
+.table{display:grid;grid-template-columns:40px 1fr 100px 120px;gap:8px}
+.thead{display:contents}
+.trow{display:contents}
+.table > .thead > div{font-size:12px;font-weight:700;color:#64748b;padding:6px 8px}
+.table > .trow > div{background:#fff;border:1px solid #e5e7eb;padding:8px;border-radius:10px}
+.right{text-align:right}
+
+/* Grids */
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+
+/* ============================== */
+/*        DESKTOP POLISH          */
+/* ============================== */
+
+/* Center content and cap width on larger screens */
+.container{
+  width:100%;
+  max-width:1200px;
+  margin:0 auto;
+  padding:16px;
+}
+
+/* Typography scales a bit on desktop */
+@media (min-width: 900px){
+  .title{font-size:clamp(18px,2.2vw,28px)}
+  .sub{font-size:14px}
+  .btn,.input{font-size:16px}
+}
+
+/* Make grids responsive: stack on mobile, columns on desktop */
+@media (max-width: 899px){
+  .grid2{grid-template-columns:1fr}
+  .grid3{grid-template-columns:1fr}
+  .table{grid-template-columns:32px 1fr 90px 90px}
+}
+@media (min-width: 900px){
+  .grid2{grid-template-columns:1fr 1fr}
+  .grid3{grid-template-columns:1fr 1fr 1fr}
+}
+
+/* Top header spacing on wide screens */
+@media (min-width: 1024px){
+  .app-header{height:64px}
+}
+
+/* Optional: compact rows on desktop tables */
+@media (min-width: 900px){
+  .table > .trow > div{padding:10px}
+}
+
+/* Utility: divider for nav sections */
+.nav-divider{width:1px;height:24px;background:#334155;margin:0 6px}
+
+/* Optional: card hover on desktop */
+@media (hover: hover){
+  .card:hover{box-shadow:0 4px 18px rgba(2,6,23,.08)}
+}
+
+/* ============================== */
+/*   OPTIONAL PAGE CONTAINMENT    */
+/* ============================== */
+
+/* If you wrap routes in <div class="container"> inside AppShell, style is ready.
+   Otherwise, you can rely on the inline maxWidth in AppShell. This is safe either way. */
+
+/* (Optional) Make forms feel roomy on desktop */
+@media (min-width: 900px){
+  .input{padding:12px 14px}
+}
+
+/* (Optional) Softer panel background for long pages */
+.app-main{
+  background: #f7f9fc;
+}
+
+/* (Optional) Slightly larger badges on desktop */
+@media (min-width: 900px){
+  .badge{font-size:12px;padding:5px 10px}
+}
