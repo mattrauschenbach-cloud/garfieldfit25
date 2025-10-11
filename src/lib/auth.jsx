@@ -4,6 +4,7 @@ import { onAuthStateChanged, signOut as fbSignOut } from 'firebase/auth'
 import { auth, db } from './firebase'
 import { doc, onSnapshot, setDoc, getDoc } from 'firebase/firestore'
 
+// Ensure a profile doc exists and has required fields
 async function ensureProfile(u) {
   if (!u) return null
   const ref = doc(db, 'profiles', u.uid)
@@ -19,7 +20,7 @@ async function ensureProfile(u) {
     await setDoc(ref, base, { merge: true })
     return base
   }
-  // merge any missing fields
+
   const data = snap.data() || {}
   const next = { ...base, ...data }
   if (!data.displayName || !data.role) {
@@ -34,26 +35,50 @@ function useAuth() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    // watch auth
+    let unsubProfile = null
+
     const unsubAuth = onAuthStateChanged(auth, async (u) => {
-      setUser(u)
+      // clear any previous profile subscription
+      if (unsubProfile) {
+        unsubProfile()
+        unsubProfile = null
+      }
+
       if (!u) {
+        setUser(null)
         setProfile(null)
         setLoading(false)
         return
       }
 
+      setUser(u)
+      // make sure a profile exists and has basics
       await ensureProfile(u)
 
-      // watch profile doc
       const ref = doc(db, 'profiles', u.uid)
-      const unsubProfile = onSnapshot(ref, (snap) => {
-        setProfile(snap.exists() ? snap.data() : null)
-        setLoading(false)
-      }, () => setLoading(false))
-
-      // cleanup nested sub
-      return () => unsubProfile()
+      unsubProfile = onSnapshot(
+        ref,
+        (snap) => {
+          setProfile(snap.exists() ? snap.data() : null)
+          setLoading(false)
+        },
+        () => setLoading(false)
+      )
     })
 
-    return (
+    return () => {
+      if (unsubProfile) unsubProfile()
+      unsubAuth()
+    }
+  }, [])
+
+  return {
+    user,
+    profile,
+    loading,
+    signOut: () => fbSignOut(auth),
+  }
+}
+
+export { useAuth }
+export default useAuth
