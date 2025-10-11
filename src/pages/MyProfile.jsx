@@ -46,6 +46,7 @@ export default function MyProfile(){
     <div className="container vstack">
       <div className="card vstack">
         <span className="badge">My Profile</span>
+
         <div className="hstack" style={{gap:12, flexWrap:"wrap"}}>
           <div className="vstack" style={{minWidth:280}}>
             <label className="badge">Display name</label>
@@ -54,8 +55,11 @@ export default function MyProfile(){
                 value={displayName}
                 onChange={e=>setDisplayName(e.target.value)}
                 placeholder="Your name"
-                style={{background:"#0b1426", color:"#e5e7eb", border:"1px solid #1f2937",
-                        borderRadius:10, padding:"8px 10px", minWidth:220}}
+                style={{
+                  background:"#0b1426", color:"#e5e7eb",
+                  border:"1px solid #1f2937", borderRadius:10,
+                  padding:"8px 10px", minWidth:220
+                }}
               />
               <button className="btn primary" disabled={saving}>Save</button>
             </form>
@@ -68,6 +72,42 @@ export default function MyProfile(){
                 value={role}
                 onChange={e=>setRole(e.target.value)}
                 disabled={saving}
-                style={{background:"#0b1426", color:"#e5e7eb", border:"1px solid #1f2937",
- 
-::contentReference[oaicite:0]{index=0}
+                style={{
+                  background:"#0b1426", color:"#e5e7eb",
+                  border:"1px solid #1f2937", borderRadius:10,
+                  padding:"8px 10px", minWidth:220
+                }}
+              >
+                {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+              </select>
+              <button className="btn" disabled={saving}>Save</button>
+            </form>
+            <p style={{color:"#9ca3af", margin:0, fontSize:13}}>
+              Role changes may be restricted by Firestore rules unless you’re owner.
+            </p>
+          </div>
+        </div>
+
+        <div className="hstack" style={{gap:8, flexWrap:"wrap", marginTop:8}}>
+          <span className="badge">UID: {user.uid}</span>
+          <span className="badge">Email: {user.email || "—"}</span>
+          <span className="badge">Current role: {profile?.role || "member"}</span>
+        </div>
+
+        {msg && (
+          <div
+            className="card"
+            style={{
+              marginTop:12,
+              borderColor: msg.type === "ok" ? "#064e3b" : "#7f1d1d",
+              background: msg.type === "ok" ? "#062b24" : "#1f1315",
+              color: msg.type === "ok" ? "#A7F3D0" : "#fecaca"
+            }}
+          >
+            {msg.text}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
