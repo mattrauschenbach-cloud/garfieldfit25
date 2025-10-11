@@ -6,9 +6,7 @@ export default function NavBar(){
   const [open, setOpen] = useState(false)
   const { user, profile, signOut } = useAuth()
 
-  const linkClass = ({ isActive }) =>
-    "nav-link" + (isActive ? " active" : "")
-
+  const linkClass = ({ isActive }) => "nav-link" + (isActive ? " active" : "")
   const role = profile?.role || "member"
   const canMentor = ["mentor","admin","owner"].includes(role)
   const canAdmin  = ["admin","owner"].includes(role)
@@ -27,6 +25,7 @@ export default function NavBar(){
           </Link>
         </div>
         <div className="hstack" style={{gap:10}}>
+          {role === "owner" && <Link className="btn ghost" to="/owner">Owner</Link>}
           {user ? (
             <>
               <span className="badge">{role}</span>
@@ -49,15 +48,19 @@ export default function NavBar(){
           {canAdmin && (
             <NavLink to="/admin-standards" className={linkClass} onClick={()=>setOpen(false)}>Admin Standards</NavLink>
           )}
+          {role === "owner" && (
+            <NavLink to="/owner/members" className={linkClass} onClick={()=>setOpen(false)}>Owner · Members & Roles</NavLink>
+          )}
           <NavLink to="/diag" className={linkClass} onClick={()=>setOpen(false)}>Diagnostics</NavLink>
         </div>
       </div>
+
       <style>{`
         .nav-link { padding:8px 10px; border-radius:10px; display:inline-flex; align-items:center; }
         .nav-link.active, .nav-link:hover { background:#0f1a30; text-decoration:none }
         @media (min-width: 820px){
           .nav .inner{ gap:16px; }
-          .nav .container + .container{ display:none; } /* hide drawer on wide screens */
+          .nav .container + .container{ display:none; }
         }
       `}</style>
     </nav>
