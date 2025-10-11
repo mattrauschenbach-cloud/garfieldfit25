@@ -13,6 +13,7 @@ import Log from "./pages/Log"
 import Members from "./pages/Members"
 import MyProfile from "./pages/MyProfile"
 import Standards from "./pages/Standards"
+import Checkoffs from "./pages/Checkoffs"
 import Diag from "./pages/Diag"
 
 export default function App(){
@@ -26,38 +27,11 @@ export default function App(){
           <Route path="/diag" element={<Diag />} />
 
           {/* Protected */}
-          <Route
-            path="/log"
-            element={
-              <ProtectedRoute>
-                <Log />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/members"
-            element={
-              <ProtectedRoute>
-                <Members />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/me"
-            element={
-              <ProtectedRoute>
-                <MyProfile />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/standards"
-            element={
-              <ProtectedRoute>
-                <Standards />
-              </ProtectedRoute>
-            }
-          />
+          <Route path="/log" element={<ProtectedRoute><Log /></ProtectedRoute>} />
+          <Route path="/members" element={<ProtectedRoute><Members /></ProtectedRoute>} />
+          <Route path="/me" element={<ProtectedRoute><MyProfile /></ProtectedRoute>} />
+          <Route path="/standards" element={<ProtectedRoute><Standards /></ProtectedRoute>} />
+          <Route path="/checkoffs" element={<ProtectedRoute><Checkoffs /></ProtectedRoute>} />
 
           {/* Alias & 404 */}
           <Route path="/home" element={<Navigate to="/" replace />} />
