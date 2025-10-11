@@ -1,6 +1,6 @@
 import { NavLink, Link } from "react-router-dom"
 import { useState } from "react"
-import { useAuth } from "../lib/auth"
+import useAuth from "../lib/auth"
 
 export default function NavBar(){
   const [open, setOpen] = useState(false)
