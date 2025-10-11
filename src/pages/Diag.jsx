@@ -1,49 +1,99 @@
-import { useEffect, useState } from 'react'
-import { db } from '../lib/firebase'
-import { collection, collectionGroup, getDocs, limit } from 'firebase/firestore'
+import { useEffect, useState } from "react"
+import { db } from "../lib/firebase"
+import {
+  collection, getCountFromServer, collectionGroup, getDocs, limit, query
+} from "firebase/firestore"
+
+const CANDIDATE_WEEKLY = ["weekly", "weeklyEntries", "weekly entries"]
 
 export default function Diag(){
-  const [info, setInfo] = useState({ env: {}, results: [] })
+  const [env, setEnv] = useState({})
+  const [profilesCount, setProfilesCount] = useState(null)
+  const [weeklyInfo, setWeeklyInfo] = useState({ status: "pending" })
+  const [errors, setErrors] = useState([])
+
+  useEffect(() => {
+    setEnv({
+      VITE_FIREBASE_PROJECT_ID: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+      VITE_FIREBASE_AUTH_DOMAIN: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+      VITE_FIREBASE_STORAGE_BUCKET: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+    })
+  }, [])
 
   useEffect(() => {
     (async () => {
-      const results = []
-      const env = {
-        VITE_FIREBASE_PROJECT_ID: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-        VITE_FIREBASE_AUTH_DOMAIN: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-        VITE_FIREBASE_STORAGE_BUCKET: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+      try {
+        const c = await getCountFromServer(collection(db, "profiles"))
+        setProfilesCount(c.data().count)
+      } catch (e) {
+        setErrors(x => [...x, `profiles: ${e.code || e.message}`])
       }
 
-      async function tryQuery(label, fn) {
+      // try candidate subcollection names, one by one
+      for (const name of CANDIDATE_WEEKLY) {
         try {
-          const snap = await fn()
-          results.push({ label, ok: true, count: snap.size })
+          // quick probe without filters (avoids composite index issues)
+          const q = query(collectionGroup(db, name), limit(1))
+          const snap = await getDocs(q)
+          setWeeklyInfo({
+            status: "ok",
+            foundName: name,
+            sampleCount: snap.size
+          })
+          return
         } catch (e) {
-          results.push({ label, ok: false, error: e.code || e.message })
+          if (e?.code === "permission-denied") {
+            setWeeklyInfo({ status: "error", error: "permission-denied", note: "Check Firestore rules & Authorized domains." })
+            return
+          }
+          // keep trying the next candidate; record error for debugging
+          setWeeklyInfo(w => (w.status === "pending" ? { status: "trying", lastError: e.message } : w))
         }
       }
-
-      await tryQuery('profiles (collection)', () => getDocs(collection(db, 'profiles')))
-      await tryQuery('weekly entries (collectionGroup)', () => getDocs(limit(collectionGroup(db, 'entries'), 1)))
-
-      setInfo({ env, results })
+      setWeeklyInfo({ status: "error", error: "not-found", note: "No weekly* subcollection detected. Pick 'weekly' for consistency (no spaces)." })
     })()
   }, [])
 
   return (
-    <div style={{ padding: 20, fontFamily: 'system-ui' }}>
-      <h1>Diag</h1>
-      <pre>{JSON.stringify(info.env, null, 2)}</pre>
-      <ul>
-        {info.results.map((r, i) => (
-          <li key={i} style={{ marginTop: 8 }}>
-            <b>{r.label}:</b> {r.ok ? `OK (docs: ${r.count})` : `ERROR → ${r.error}`}
-          </li>
-        ))}
-      </ul>
-      <p style={{marginTop:12, color:'#6b7280'}}>
-        If reads error with "permission-denied" even with open rules, your site is using a different Firebase project.
-      </p>
+    <div className="container vstack">
+      <div className="card">
+        <div className="badge">Env</div>
+        <pre style={{whiteSpace:"pre-wrap"}}>{JSON.stringify(env, null, 2)}</pre>
+        {env.VITE_FIREBASE_STORAGE_BUCKET?.endsWith(".appspot.com") ? null : (
+          <p style={{color:"#fca5a5"}}>⚠️ storageBucket should end with <b>.appspot.com</b></p>
+        )}
+      </div>
+
+      <div className="card">
+        <div className="badge">profiles (collection)</div>
+        <p>{profilesCount === null ? "Loading…" : `OK (docs: ${profilesCount})`}</p>
+      </div>
+
+      <div className="card">
+        <div className="badge">weekly (collectionGroup)</div>
+        {weeklyInfo.status === "ok" && (
+          <p>OK — detected subcollection name: <b>{weeklyInfo.foundName}</b> (sample: {weeklyInfo.sampleCount})</p>
+        )}
+        {weeklyInfo.status !== "ok" && (
+          <p style={{color:"#fca5a5"}}>
+            {weeklyInfo.error === "permission-denied"
+              ? "ERROR → permission-denied (check rules & authorized domains)."
+              : "ERROR → no subcollection found named weekly/weeklyEntries/\"weekly entries\"."}
+            {" "}
+            {weeklyInfo.note}
+          </p>
+        )}
+        <p style={{color:"#9ca3af", marginTop:8}}>
+          Recommended structure: <code>profiles/{'{uid}'}/weekly/{'{weekId}'}</code> (no spaces).
+        </p>
+      </div>
+
+      {errors.length > 0 && (
+        <div className="card" style={{borderColor:"#7f1d1d", background:"#1f1315", color:"#fecaca"}}>
+          <div className="badge">Diag warnings</div>
+          <pre style={{whiteSpace:"pre-wrap"}}>{errors.join("\n")}</pre>
+        </div>
+      )}
     </div>
   )
 }
