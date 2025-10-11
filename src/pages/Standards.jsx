@@ -4,12 +4,12 @@ import useAuth from "../lib/auth"
 import { db } from "../lib/firebase"
 import {
   addDoc, collection, deleteDoc, doc, onSnapshot, orderBy, query,
-  serverTimestamp, setDoc, updateDoc, writeBatch, getDocs, where
+  serverTimestamp, setDoc, updateDoc, writeBatch, getDocs
 } from "firebase/firestore"
 
 const TIERS = ["committed", "developmental", "advanced", "elite"]
 
-// Your defaults (applied to every tier by the seed button)
+// Default groups to seed (applies to all tiers when you click "Seed defaults")
 const DEFAULTS = {
   strength: [
     "Deadlift",
@@ -54,11 +54,23 @@ export default function Standards(){
   const [newTier, setNewTier] = useState("committed")
   const [newCategory, setNewCategory] = useState("strength")
 
-  // live standards
+  // live standards (normalize any old docs that might have "tier " field)
   useEffect(() => {
-    const q = query(collection(db, "standards"), orderBy("tier"), orderBy("category"), orderBy("title"))
+    const q = query(
+      collection(db, "standards"),
+      orderBy("tier"),
+      orderBy("category"),
+      orderBy("title")
+    )
     const unsub = onSnapshot(q,
-      snap => setRows(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
+      snap => {
+        const arr = snap.docs.map(d => {
+          const data = d.data()
+          const tier = data.tier ?? data["tier "] ?? "committed" // normalize
+          return { id: d.id, ...data, tier }
+        })
+        setRows(arr)
+      },
       e => setErr(e)
     )
     return unsub
@@ -68,7 +80,7 @@ export default function Standards(){
   const byTier = useMemo(() => {
     const map = Object.fromEntries(TIERS.map(t => [t, []]))
     rows.forEach(r => {
-      const t = (r.tier || "committed")
+      const t = r.tier || "committed"
       if (!map[t]) map[t] = []
       map[t].push(r)
     })
@@ -90,7 +102,7 @@ export default function Standards(){
       setBusy("add")
       await addDoc(collection(db, "standards"), {
         title: newTitle.trim(),
-        tier: newTier,
+        tier: newTier,                 // correct key
         category: newCategory,
         active: true,
         createdAt: serverTimestamp(),
@@ -109,7 +121,7 @@ export default function Standards(){
     const patch = {
       title: (r._title ?? r.title)?.trim() || r.title,
       category: (r._category ?? r.category) || "strength",
-      tier: r._tier ?? r.tier,
+      tier: r._tier ?? r.tier,        // correct key
       updatedAt: serverTimestamp(),
     }
     try{
@@ -157,13 +169,9 @@ export default function Standards(){
     if (!confirm("Seed the default standards into ALL tiers?")) return
     try{
       setBusy("seed")
-      // Gather existing (tier+title) to avoid dupes
-      const existing = new Set()
-      const snap = await getDocs(collection(db, "standards"))
-      snap.forEach(d => {
-        const s = d.data()
-        existing.add(`${(s.tier||"").toLowerCase()}|${(s.title||"").toLowerCase()}`)
-      })
+
+      // Build a dedupe set from current rows
+      const existing = new Set(rows.map(r => `${(r.tier||"").toLowerCase()}|${(r.title||"").toLowerCase()}`))
 
       const batch = writeBatch(db)
       TIERS.forEach(tier => {
@@ -174,7 +182,7 @@ export default function Standards(){
             const ref = doc(collection(db, "standards"))
             batch.set(ref, {
               title,
-              tier,
+              tier,                 // correct key
               category,
               active: true,
               createdAt: serverTimestamp(),
@@ -244,7 +252,10 @@ export default function Standards(){
 
       {/* Per-tier accordions */}
       {TIERS.map(tier => {
-        const list = (byTier[tier] || []).sort((a,b) => (a.category||"").localeCompare(b.category||"") || (a.title||"").localeCompare(b.title||""))
+        const list = (byTier[tier] || []).sort((a,b) =>
+          (a.category||"").localeCompare(b.category||"") ||
+          (a.title||"").localeCompare(b.title||"")
+        )
         const open = expanded.has(tier)
         const activeCount = list.filter(s => s.active !== false).length
         return (
