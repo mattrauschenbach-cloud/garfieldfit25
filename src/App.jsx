@@ -1,98 +1,112 @@
 // src/App.jsx
-import { Suspense, lazy } from 'react'
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import NotFound from './components/NotFound'
-import AppShell from './components/AppShell'
+import { Suspense, lazy } from "react"
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom"
 
-// PAGES
-const WeeklyChallenge  = lazy(() => import('./pages/WeeklyChallenge.jsx'))
-const MonthlyChallenge = lazy(() => import('./pages/MonthlyChallenge.jsx'))
-const Members          = lazy(() => import('./pages/Members.jsx'))
-const Standards        = lazy(() => import('./pages/Standards.jsx'))
-const TierCheckoff     = lazy(() => import('./pages/TierCheckoff.jsx'))
-const AdminStandards   = lazy(() => import('./pages/AdminStandards.jsx'))
-const Login            = lazy(() => import('./pages/Login.jsx'))
+import AppShell from "./components/AppShell"
+import ProtectedRoute from "./components/ProtectedRoute"
+import MentorRoute from "./components/MentorRoute"
+import NotFound from "./components/NotFound"
 
-// Simple guards (replace with your own if you already have them)
-import { auth, db } from './lib/firebase'
-import { doc, getDoc } from 'firebase/firestore'
-import { useEffect, useState } from 'react'
+// Lazy-loaded pages
+const Home = lazy(() => import("./pages/Home"))
+const Login = lazy(() => import("./pages/Login"))
+const Members = lazy(() => import("./pages/Members"))
+const MonthlyChallenge = lazy(() => import("./pages/MonthlyChallenge"))
+const MonthlyAdmin = lazy(() => import("./pages/MonthlyAdmin"))
+const AdminStandards = lazy(() => import("./pages/AdminStandards"))
+const Diag = lazy(() => import("./pages/Diag"))
 
-function ProtectedRoute({ children }) {
-  const [user, setUser] = useState(() => auth.currentUser)
-  useEffect(() => {
-    const unsub = auth.onAuthStateChanged(setUser)
-    return () => unsub()
-  }, [])
-  if (user === undefined) return null
-  return user ? children : <Navigate to="/login" replace />
-}
+// Owner (optional but recommended)
+const OwnerDashboard = lazy(() => import("./pages/OwnerDashboard"))
+const OwnerMembers = lazy(() => import("./pages/OwnerMembers"))
 
-function MentorRoute({ children }) {
-  const [user, setUser] = useState(() => auth.currentUser)
-  const [ok, setOk] = useState(null)
+// Optional extra demo/debug pages if they exist in your repo
+const Ping = lazy(() => import("./pages/Ping").catch(() => ({ default: () => null })))
+const PermTest = lazy(() => import("./pages/PermTest").catch(() => ({ default: () => null })))
 
-  useEffect(() => {
-    const unsub = auth.onAuthStateChanged(async (u) => {
-      setUser(u)
-      if (!u) { setOk(false); return }
-      try {
-        const snap = await getDoc(doc(db, 'profiles', u.uid))
-        const role = snap.exists() ? (snap.data().role || 'member') : 'member'
-        setOk(role === 'mentor' || role === 'admin')
-      } catch {
-        setOk(false)
-      }
-    })
-    return () => unsub()
-  }, [])
-
-  if (!user) return <Navigate to="/login" replace />
-  if (ok === null) return null
-  return ok ? children : <div className="card pad"><div className="title">Access denied</div><div className="sub">Mentor/admin only.</div></div>
+function Loader() {
+  return (
+    <div className="container">
+      <div className="card">Loading…</div>
+    </div>
+  )
 }
 
 export default function App() {
   return (
     <BrowserRouter>
       <AppShell>
-        <Suspense fallback={<div className="card pad">Loading…</div>}>
+        <Suspense fallback={<Loader />}>
           <Routes>
-            <Route path="/" element={<Navigate to="/weekly" replace />} />
+            {/* Public */}
+            <Route path="/" element={<Home />} />
+            <Route path="/login" element={<Login />} />
+            <Route path="/diag" element={<Diag />} />
 
-            <Route path="/weekly" element={<WeeklyChallenge />} />
-            <Route path="/monthly" element={<MonthlyChallenge />} />
-            <Route path="/members" element={<Members />} />
-            <Route path="/standards" element={<Standards />} />
-
-            {/* Tier checkoff: mentor/admin only */}
+            {/* Member-protected */}
             <Route
-              path="/tier-checkoff"
+              path="/members"
               element={
                 <ProtectedRoute>
-                  <MentorRoute>
-                    <TierCheckoff />
-                  </MentorRoute>
+                  <Members />
                 </ProtectedRoute>
               }
             />
 
-            {/* Admin standards: mentor/admin only */}
+            <Route
+              path="/monthly"
+              element={
+                <ProtectedRoute>
+                  <MonthlyChallenge />
+                </ProtectedRoute>
+              }
+            />
+
+            {/* Mentor/Admin/Owner */}
+            <Route
+              path="/monthly-admin"
+              element={
+                <MentorRoute>
+                  <MonthlyAdmin />
+                </MentorRoute>
+              }
+            />
             <Route
               path="/admin-standards"
               element={
+                <MentorRoute>
+                  <AdminStandards />
+                </MentorRoute>
+              }
+            />
+
+            {/* Owner */}
+            <Route
+              path="/owner"
+              element={
                 <ProtectedRoute>
-                  <MentorRoute>
-                    <AdminStandards />
-                  </MentorRoute>
+                  <OwnerDashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/owner/members"
+              element={
+                <ProtectedRoute>
+                  <OwnerMembers />
                 </ProtectedRoute>
               }
             />
 
-            <Route path="/login" element={<Login />} />
+            {/* Optional extras (safe to leave; render nothing if not present) */}
+            <Route path="/ping" element={<Ping />} />
+            <Route path="/permtest" element={<PermTest />} />
 
-            {/* fallback */}
-            <Route path="*" element={<Navigate to="/weekly" replace />} />
+            {/* Redirects */}
+            <Route path="/home" element={<Navigate to="/" replace />} />
+
+            {/* 404 */}
+            <Route path="*" element={<NotFound />} />
           </Routes>
         </Suspense>
       </AppShell>
