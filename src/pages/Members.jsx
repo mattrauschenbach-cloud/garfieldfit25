@@ -1,103 +1,97 @@
-import { useEffect, useState } from 'react'
-import { db } from '../lib/firebase'
-import { collection, onSnapshot, doc, updateDoc, setDoc, getDocs, query, where, getDoc as getDocFs } from 'firebase/firestore'
-import { useAuthState } from '../lib/auth'
+import { useEffect, useMemo, useState } from "react"
+import { useAuth } from "../lib/auth"
+import { db } from "../lib/firebase"
+import {
+  collection, query, orderBy, onSnapshot, doc, setDoc
+} from "firebase/firestore"
+import AccessDenied from "../components/AccessDenied"
 
-const TIERS = ['committed','developmental','advanced','elite']
-const SHIFTS = ['A','B','C']
+const ROLES = ["member", "mentor", "admin", "owner"]
 
-export default function Members() {
-  const { profile } = useAuthState()
-  const [members, setMembers] = useState([])
-  const [mentors, setMentors] = useState([])
-  const isMentor = profile?.role === 'mentor'
+export default function OwnerMembers(){
+  const { user, profile, loading } = useAuth()
+  const [rows, setRows] = useState([])
+  const [busy, setBusy] = useState(null) // uid while saving
 
-  useEffect(() => onSnapshot(collection(db, 'profiles'), (snap) => {
-    setMembers(snap.docs.map(d => ({ id: d.id, ...d.data() })))
-  }), [])
+  if (loading) return <div className="container"><div className="card">Loading…</div></div>
+  if (!user || (profile?.role !== "owner")) return <AccessDenied reason="Owner access required." />
 
-  useEffect(() => { (async ()=>{
-    const qMentors = query(collection(db,'profiles'), where('role','==','mentor'))
-    const s = await getDocs(qMentors)
-    setMentors(s.docs.map(d => ({ id:d.id, ...d.data() })))
-  })() }, [])
+  useEffect(() => {
+    const q = query(collection(db, "profiles"), orderBy("displayName"))
+    const unsub = onSnapshot(q, snap => {
+      setRows(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+    })
+    return unsub
+  }, [])
 
-  const setTier = (uid, tier) => isMentor && updateDoc(doc(db, 'profiles', uid), { tier })
-  const setShift = (uid, shift) => isMentor && updateDoc(doc(db, 'profiles', uid), { shift })
-  const toggleCommitted = (uid, val) => isMentor && updateDoc(doc(db, 'profiles', uid), { isCommitted: val })
-  const setRole = (uid, role) => isMentor && updateDoc(doc(db, 'profiles', uid), { role })
-  const setMentorFor = (uid, mentorId, mentorName) => isMentor && updateDoc(doc(db,'profiles',uid), { mentorId, mentorName })
-
-  const assignMaster = async (uid) => {
-    const masterRef = doc(db,'config','standards_master')
-    const masterSnap = await getDocFs(masterRef)
-    const items = masterSnap.exists() ? (masterSnap.data().items || []) : []
-    await setDoc(doc(db,'standards',uid), { items }, { merge:true })
-  }
-
-  const assignMasterAll = async () => {
-    const masterRef = doc(db,'config','standards_master')
-    const masterSnap = await getDocFs(masterRef)
-    const items = masterSnap.exists() ? (masterSnap.data().items || []) : []
-    for (const m of members) {
-      await setDoc(doc(db,'standards',m.id), { items }, { merge:true })
+  async function updateRole(uid, role){
+    if (!ROLES.includes(role)) return
+    try {
+      setBusy(uid)
+      await setDoc(doc(db, "profiles", uid), { role }, { merge: true })
+    } finally {
+      setBusy(null)
     }
   }
 
-  return (
-    <section className="space-y-6">
-      <h2 className="text-2xl font-bold">Members</h2>
-      {!isMentor && <p className="text-sm text-slate-600">View only. Mentor tools are hidden.</p>}
-      {isMentor && <div className="flex justify-end"><button className="text-sm border rounded px-2 py-1" onClick={assignMasterAll}>Assign master to ALL</button></div>}
-      <div className="grid md:grid-cols-2 gap-3">
-        {members.map(m => {
-          const isThisMentor = m.role === 'mentor'
-          return (
-            <div key={m.id} className="border rounded-lg p-3 bg-white">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="font-medium">{m.displayName || 'Firefighter'}</div>
-                  <div className="text-xs text-slate-500">
-                    Role: {isThisMentor ? 'mentor' : 'member'} • Tier: {m.tier} • Shift: {m.shift || 'A'} • Committed: {m.isCommitted ? '✅' : '—'}
-                    {m.mentorName ? ` • Mentor: ${m.mentorName}` : ''}
-                  </div>
-                </div>
-                {isMentor && (
-                  <div className="flex gap-2">
-                    {isThisMentor
-                      ? <button className="text-sm border rounded px-2 py-1" onClick={() => setRole(m.id, 'member')}>Remove mentor</button>
-                      : <button className="text-sm border rounded px-2 py-1" onClick={() => setRole(m.id, 'mentor')}>Make mentor</button>}
-                    <button className="text-sm border rounded px-2 py-1" onClick={() => assignMaster(m.id)}>Assign master</button>
-                  </div>
-                )}
-              </div>
+  const totals = useMemo(() => {
+    const t = { member:0, mentor:0, admin:0, owner:0 }
+    rows.forEach(r => t[r.role || "member"] = (t[r.role || "member"]||0) + 1)
+    return t
+  }, [rows])
 
-              {isMentor && (
-                <div className="mt-3 flex flex-wrap items-center gap-2">
-                  <input className="border rounded px-2 py-1" defaultValue={m.displayName || ''} onBlur={(e)=>updateDoc(doc(db,'profiles',m.id), { displayName: e.target.value })} placeholder="Name"/>
-                  <select className="border rounded px-2 py-1" value={m.tier || 'developmental'} onChange={e=>setTier(m.id, e.target.value)}>
-                    {TIERS.map(t => <option key={t} value={t}>{t}</option>)}
-                  </select>
-                  <select className="border rounded px-2 py-1" value={m.shift || 'A'} onChange={e=>setShift(m.id, e.target.value)}>
-                    {SHIFTS.map(s => <option key={s} value={s}>{s}</option>)}
-                  </select>
-                  <label className="text-sm flex items-center gap-1">
-                    <input type="checkbox" checked={!!m.isCommitted} onChange={e=>toggleCommitted(m.id, e.target.checked)} />
-                    committed
-                  </label>
-                  <select className="border rounded px-2 py-1" value={m.mentorId || ''} onChange={e=>{
-                    const mentor = mentors.find(x=>x.id===e.target.value)
-                    setMentorFor(m.id, mentor?.id || '', mentor?.displayName || '')
-                  }}>
-                    <option value="">— assign mentor —</option>
-                    {mentors.map(mt => <option key={mt.id} value={mt.id}>{mt.displayName || 'Mentor'}</option>)}
-                  </select>
-                </div>
-              )}
-            </div>
-          )
-        })}
+  return (
+    <div className="container vstack">
+      <div className="card hstack" style={{justifyContent:"space-between"}}>
+        <div className="hstack" style={{gap:8}}>
+          <span className="badge">Members</span>
+          <b>{rows.length}</b>
+        </div>
+        <div className="hstack" style={{gap:8, flexWrap:"wrap"}}>
+          {ROLES.map(r => <span key={r} className="badge">{r}: {totals[r]||0}</span>)}
+        </div>
       </div>
-    </section>
+
+      <div className="card" style={{padding:0}}>
+        <table style={{width:"100%", borderCollapse:"collapse"}}>
+          <thead>
+            <tr style={{background:"#0f1a30"}}>
+              <th style={th}>Name</th>
+              <th style={th}>Email</th>
+              <th style={th}>UID</th>
+              <th style={th}>Role</th>
+              <th style={th}></th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(r => (
+              <tr key={r.id} style={{borderTop:"1px solid #1f2937"}}>
+                <td style={td}>{r.displayName || "—"}</td>
+                <td style={td}>{r.email || "—"}</td>
+                <td style={{...td, fontSize:12, color:"#9ca3af"}}>{r.id}</td>
+                <td style={td}>
+                  <select
+                    value={r.role || "member"}
+                    onChange={e => updateRole(r.id, e.target.value)}
+                    disabled={busy === r.id}
+                    style={select}
+                  >
+                    {ROLES.map(role => <option key={role} value={role}>{role}</option>)}
+                  </select>
+                </td>
+                <td style={td}>{busy === r.id ? <span className="badge">Saving…</span> : null}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   )
+}
+
+const th = { textAlign:"left", padding:"10px 12px", fontSize:12, color:"#9ca3af" }
+const td = { padding:"12px" }
+const select = {
+  background:"#0b1426", color:"#e5e7eb", border:"1px solid #1f2937",
+  borderRadius:8, padding:"8px 10px"
 }
