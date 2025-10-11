@@ -5,6 +5,7 @@ import { db } from "../lib/firebase"
 import { collection, onSnapshot, orderBy, query, doc, setDoc } from "firebase/firestore"
 
 const ROLES = ["member", "mentor", "admin", "owner"]
+const TIERS = ["committed", "developmental", "advanced", "elite"]
 
 export default function Members(){
   const { user, profile } = useAuth()
@@ -25,7 +26,7 @@ export default function Members(){
     return unsub
   }, [user])
 
-  // counts for safety: prevent demoting the last owner
+  // owners count (safety if you also edit roles here)
   const ownersCount = useMemo(() => rows.filter(r => (r.role || "member") === "owner").length, [rows])
 
   const filtered = useMemo(() => {
@@ -35,29 +36,25 @@ export default function Members(){
       const name = (r.displayName || "").toLowerCase()
       const email = (r.email || "").toLowerCase()
       const role = (r.role || "member").toLowerCase()
-      return name.includes(q) || email.includes(q) || role.includes(q)
+      const tier = (r.tier || "committed").toLowerCase()
+      return name.includes(q) || email.includes(q) || role.includes(q) || tier.includes(q)
     })
   }, [rows, qtext])
 
   async function updateRole(targetUid, nextRole){
-    if (!isOwner) return // extra guard; UI already hides editor
+    if (!isOwner) return
     const current = rows.find(r => r.id === targetUid)
     if (!current) return
     const prevRole = current.role || "member"
-
-    // No change
     if (prevRole === nextRole) return
 
-    // Safety: don't allow demoting the last remaining owner (esp. yourself)
+    // Prevent removing the last owner
     if (prevRole === "owner" && nextRole !== "owner" && ownersCount === 1) {
-      alert("You are the last owner. Add another owner first before demoting.")
+      alert("You are the last owner. Add another owner before demoting.")
       return
     }
-
-    // Optional confirm when changing your own role
     if (targetUid === user.uid && prevRole === "owner" && nextRole !== "owner") {
-      const ok = confirm("You’re changing your own role from OWNER. Are you sure?")
-      if (!ok) return
+      if (!confirm("You’re changing your own role from OWNER. Continue?")) return
     }
 
     try {
@@ -66,6 +63,21 @@ export default function Members(){
     } catch (e) {
       console.error("updateRole error:", e)
       alert(`Failed to update role: ${e.code || e.message}`)
+    } finally {
+      setBusyUid(null)
+    }
+  }
+
+  async function updateTier(targetUid, nextTier){
+    if (!isOwner) return
+    const prev = (rows.find(r => r.id === targetUid)?.tier) || "committed"
+    if (prev === nextTier) return
+    try {
+      setBusyUid(targetUid)
+      await setDoc(doc(db, "profiles", targetUid), { tier: nextTier }, { merge: true })
+    } catch (e) {
+      console.error("updateTier error:", e)
+      alert(`Failed to update tier: ${e.code || e.message}`)
     } finally {
       setBusyUid(null)
     }
@@ -81,16 +93,16 @@ export default function Members(){
             <span className="badge">Owners: <b>{ownersCount}</b></span>
           </div>
           <input
-            placeholder="Search name, email, role"
+            placeholder="Search name, email, role, tier"
             value={qtext}
             onChange={e=>setQtext(e.target.value)}
             style={{background:"#0b1426", color:"#e5e7eb", border:"1px solid #1f2937",
-                    borderRadius:10, padding:"8px 10px", minWidth:220}}
+                    borderRadius:10, padding:"8px 10px", minWidth:260}}
           />
         </div>
         {!isOwner && (
           <p style={{color:"#9ca3af", margin:0, fontSize:13}}>
-            All signed-in users can view everyone. Only <b>owner</b> can change roles.
+            All signed-in users can view everyone. Only <b>owner</b> can change roles & tiers.
           </p>
         )}
       </div>
@@ -108,6 +120,7 @@ export default function Members(){
               <th style={th}>Name</th>
               <th style={th}>Email</th>
               <th style={th}>Role</th>
+              <th style={th}>Tier</th>
               <th style={th}>UID</th>
               {isOwner ? <th style={th}></th> : null}
             </tr>
@@ -115,15 +128,15 @@ export default function Members(){
           <tbody>
             {filtered.map(r => {
               const role = r.role || "member"
-              const editing = isOwner
+              const tier = r.tier || "committed"
               return (
                 <tr key={r.id} style={{borderTop:"1px solid #1f2937"}}>
                   <td style={td}>{r.displayName || "—"}</td>
                   <td style={td}>{r.email || "—"}</td>
 
-                  {/* Role cell: badge for non-owner, dropdown for owner */}
+                  {/* Role cell */}
                   <td style={td}>
-                    {!editing ? (
+                    {!isOwner ? (
                       <span className="badge">{role}</span>
                     ) : (
                       <select
@@ -131,9 +144,24 @@ export default function Members(){
                         onChange={e => updateRole(r.id, e.target.value)}
                         disabled={busyUid === r.id}
                         style={select}
-                        title={r.id === r.uid ? "role" : undefined}
                       >
                         {ROLES.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                      </select>
+                    )}
+                  </td>
+
+                  {/* Tier cell */}
+                  <td style={td}>
+                    {!isOwner ? (
+                      <span className="badge">{tier}</span>
+                    ) : (
+                      <select
+                        value={tier}
+                        onChange={e => updateTier(r.id, e.target.value)}
+                        disabled={busyUid === r.id}
+                        style={select}
+                      >
+                        {TIERS.map(t => <option key={t} value={t}>{t}</option>)}
                       </select>
                     )}
                   </td>
@@ -148,7 +176,7 @@ export default function Members(){
               )
             })}
             {filtered.length === 0 && (
-              <tr><td style={{...td, color:"#9ca3af"}} colSpan={isOwner ? 5 : 4}>No matches.</td></tr>
+              <tr><td style={{...td, color:"#9ca3af"}} colSpan={isOwner ? 6 : 5}>No matches.</td></tr>
             )}
           </tbody>
         </table>
