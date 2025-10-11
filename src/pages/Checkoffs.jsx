@@ -65,11 +65,23 @@ export default function Checkoffs(){
     if (!isMentor && user && !targetUid) setTargetUid(user.uid)
   }, [isMentor, user, targetUid])
 
-  // standards list
+  // standards list (normalize any old docs that might have "tier " field)
   useEffect(() => {
     const unsub = onSnapshot(
-      query(collection(db, "standards"), orderBy("tier"), orderBy("category"), orderBy("title")),
-      snap => setStandards(snap.docs.map(d => ({ id:d.id, ...d.data() }))),
+      query(
+        collection(db, "standards"),
+        orderBy("tier"),
+        orderBy("category"),
+        orderBy("title")
+      ),
+      snap => {
+        const arr = snap.docs.map(d => {
+          const data = d.data()
+          const tier = data.tier ?? data["tier "] ?? "committed" // normalize
+          return { id: d.id, ...data, tier }
+        })
+        setStandards(arr)
+      },
       e => setErr(e)
     )
     return unsub
@@ -102,7 +114,7 @@ export default function Checkoffs(){
       )
   }, [standards, tierFilter, q])
 
-  // progress math (always uses ALL active standards, not just filtered)
+  // progress (uses ALL active standards, not just filtered)
   const activeByTier = useMemo(() => {
     const obj = Object.fromEntries(TIERS.map(t => [t, []]))
     standards.forEach(s => {
