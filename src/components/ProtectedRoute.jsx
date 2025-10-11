@@ -1,4 +1,4 @@
-import { useAuth } from '../lib/auth'
+import useAuth from '../lib/auth'
 import AccessDenied from './AccessDenied'
 
 export default function ProtectedRoute({ children }){
