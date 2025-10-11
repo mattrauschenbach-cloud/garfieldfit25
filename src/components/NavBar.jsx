@@ -1,68 +1,22 @@
-import { NavLink, Link } from "react-router-dom"
-import { useState } from "react"
+import { Link, NavLink } from "react-router-dom"
 import useAuth from "../lib/auth"
 
 export default function NavBar(){
-  const [open, setOpen] = useState(false)
-  const { user, profile, signOut } = useAuth()
-
-  const linkClass = ({ isActive }) => "nav-link" + (isActive ? " active" : "")
-  const role = profile?.role || "member"
-  const canMentor = ["mentor","admin","owner"].includes(role)
-  const canAdmin  = ["admin","owner"].includes(role)
-
+  const { user, signOut } = useAuth()
+  const link = ({isActive}) => "nav-link" + (isActive ? " active" : "")
   return (
-    <nav className="nav">
-      <div className="inner container" style={{padding: "10px 0"}}>
-        <div className="hstack" style={{gap:10}}>
-          <button className="btn ghost" aria-label="Toggle menu"
-                  onClick={()=>setOpen(v=>!v)} style={{padding:"8px 10px"}}>
-            ☰
-          </button>
-          <Link to="/" className="hstack" style={{gap:8, fontWeight:800, letterSpacing:.2}}>
-            <span className="badge">Station 1</span>
-            <span>Fit</span>
-          </Link>
-        </div>
-        <div className="hstack" style={{gap:10}}>
-          {role === "owner" && <Link className="btn ghost" to="/owner">Owner</Link>}
-          {user ? (
-            <>
-              <span className="badge">{role}</span>
-              <button className="btn" onClick={signOut}>Sign out</button>
-            </>
-          ) : (
-            <Link className="btn" to="/login">Sign in</Link>
-          )}
-        </div>
+    <nav className="nav container">
+      <Link to="/" className="brand">Station 1 · Fit</Link>
+      <div className="links">
+        <NavLink to="/" className={link}>Home</NavLink>
+        <NavLink to="/log" className={link}>Log</NavLink>
+        <NavLink to="/diag" className={link}>Diag</NavLink>
+        {user ? (
+          <button className="btn" onClick={signOut}>Sign out</button>
+        ) : (
+          <NavLink to="/login" className="btn">Sign in</NavLink>
+        )}
       </div>
-
-      <div className="container" style={{paddingBottom: open ? 12 : 0}}>
-        <div className="vstack card" style={{display: open ? "flex":"none", padding:12}}>
-          <NavLink to="/" className={linkClass} onClick={()=>setOpen(false)}>Home</NavLink>
-          <NavLink to="/monthly" className={linkClass} onClick={()=>setOpen(false)}>Monthly Challenge</NavLink>
-          <NavLink to="/members" className={linkClass} onClick={()=>setOpen(false)}>Members</NavLink>
-          {canMentor && (
-            <NavLink to="/monthly-admin" className={linkClass} onClick={()=>setOpen(false)}>Mentor</NavLink>
-          )}
-          {canAdmin && (
-            <NavLink to="/admin-standards" className={linkClass} onClick={()=>setOpen(false)}>Admin Standards</NavLink>
-          )}
-          {role === "owner" && (
-            <NavLink to="/owner/members" className={linkClass} onClick={()=>setOpen(false)}>Owner · Members & Roles</NavLink>
-          )}
-          <NavLink to="/diag" className={linkClass} onClick={()=>setOpen(false)}>Diagnostics</NavLink>
-        </div>
-      </div>
-
-      <style>{`
-        .nav-link { padding:8px 10px; border-radius:10px; display:inline-flex; align-items:center; }
-        .nav-link.active, .nav-link:hover { background:#0f1a30; text-decoration:none }
-        @media (min-width: 820px){
-          .nav .inner{ gap:16px; }
-          .nav .container + .container{ display:none; }
-        }
-      `}</style>
     </nav>
   )
 }
