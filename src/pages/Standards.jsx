@@ -1,257 +1,386 @@
-// src/pages/Checkoffs.jsx
-import { useEffect, useMemo, useState } from "react"
+// src/pages/Standards.jsx
+import { useEffect, useMemo, useRef, useState } from "react"
 import useAuth from "../lib/auth"
 import { db } from "../lib/firebase"
 import {
-  collection, doc, onSnapshot, orderBy, query,
-  serverTimestamp, setDoc
+  addDoc, collection, deleteDoc, doc, onSnapshot, orderBy, query,
+  serverTimestamp, setDoc, updateDoc, writeBatch
 } from "firebase/firestore"
 
 const TIERS = ["committed", "developmental", "advanced", "elite"]
 
-// simple progress bar
-function ProgressBar({ value = 0, max = 1, label }) {
-  const pct = max > 0 ? Math.round((value / max) * 100) : 0
-  return (
-    <div className="vstack" style={{gap:6, minWidth:240}}>
-      {label && <div className="hstack" style={{justifyContent:"space-between"}}>
-        <span style={{color:"#9ca3af"}}>{label}</span>
-        <span style={{color:"#9ca3af"}}>{value}/{max} ({pct}%)</span>
-      </div>}
-      <div style={{
-        height:10, borderRadius:999, background:"#111827", border:"1px solid #1f2937", overflow:"hidden"
-      }}>
-        <div style={{
-          width: `${pct}%`, height:"100%", borderRadius:999,
-          background: "linear-gradient(90deg, #2563eb, #22d3ee)"
-        }}/>
-      </div>
-    </div>
-  )
+// Default groups to seed (applies to all tiers when you click "Seed defaults")
+const DEFAULTS = {
+  strength: [
+    "Deadlift",
+    "Bench Press",
+    "Back Squat",
+    "Push Ups",
+    "Pull Ups",
+    "Overhead Press",
+    "Farmers Carry",
+  ],
+  conditioning: [
+    "1 Mile Run",
+    "1.5 Mile Run",
+    "5K Run",
+    "500 m Row",
+    "Stair Climb",
+    "Burpees",
+    "Wall Balls",
+    "Jacobs Ladder",
+  ],
+  "circuit challenge": [
+    "Circuit Challenge: 100 Push Ups, 100 Air Squats, 50 Burpees, 50 Sit Ups, 25 Pull Ups, 25 Lunges (for time)",
+  ],
 }
 
-export default function Checkoffs(){
-  const { user, profile } = useAuth()
-  const isMentor = ["mentor","admin","owner"].includes(profile?.role || "member")
+const input = { background:"#0b1426", color:"#e5e7eb", border:"1px solid #1f2937", borderRadius:8, padding:"6px 8px" }
+const select = { ...input }
+const th = { textAlign:"left", padding:"10px 12px", fontSize:12, color:"#9ca3af" }
+const td = { padding:"10px 12px" }
 
-  // member picker (mentors/admin/owner can switch; others see self)
-  const [members, setMembers] = useState([])
-  const [targetUid, setTargetUid] = useState(null)
+export default function Standards(){
+  const { profile } = useAuth()
+  const isOwner = (profile?.role === "owner")
 
-  // standards + check states
-  const [standards, setStandards] = useState([])
-  const [checks, setChecks] = useState({}) // { standardId: true/false }
-  const [tierFilter, setTierFilter] = useState("all")
-  const [q, setQ] = useState("")
+  const [rows, setRows] = useState([])
   const [err, setErr] = useState(null)
+  const [busy, setBusy] = useState(null)
+  const [expanded, setExpanded] = useState(() => new Set(TIERS)) // all open initially
+  const [usingFallback, setUsingFallback] = useState(false)
+  const unsubRef = useRef(null)
 
-  // load members for selector
-  useEffect(() => {
-    if (!isMentor) { setMembers([]); setTargetUid(user?.uid || null); return }
-    const unsub = onSnapshot(
-      query(collection(db, "profiles"), orderBy("displayName")),
-      snap => {
-        const arr = snap.docs.map(d => ({ id:d.id, ...(d.data()) }))
-        setMembers(arr)
-        if (!targetUid && user) setTargetUid(user.uid)
-      },
-      e => setErr(e)
-    )
-    return unsub
-  }, [isMentor, user, targetUid])
+  // new standard form
+  const [newTitle, setNewTitle] = useState("")
+  const [newTier, setNewTier] = useState("committed")
+  const [newCategory, setNewCategory] = useState("strength")
 
-  // default to me for non-mentors
+  // subscribe with auto-fallback if composite index is missing
   useEffect(() => {
-    if (!isMentor && user && !targetUid) setTargetUid(user.uid)
-  }, [isMentor, user, targetUid])
+    function normalize(docSnap) {
+      const data = docSnap.data() || {}
+      const tier = data.tier ?? data["tier "] ?? "committed"
+      const category = data.category ?? data["category "] ?? null
+      return { id: docSnap.id, ...data, tier, category }
+    }
 
-  // standards list (normalize any old docs that might have "tier " / "category ")
-  useEffect(() => {
-    const unsub = onSnapshot(
-      query(
+    function subscribePrimary() {
+      const q = query(
         collection(db, "standards"),
         orderBy("tier"),
         orderBy("category"),
         orderBy("title")
-      ),
-      snap => {
-        const arr = snap.docs.map(d => {
-          const data = d.data()
-          const tier = data.tier ?? data["tier "] ?? "committed"
-          const category = data.category ?? data["category "] ?? null
-          return { id: d.id, ...data, tier, category }
-        })
-        setStandards(arr)
-      },
-      e => setErr(e)
-    )
-    return unsub
+      )
+      return onSnapshot(
+        q,
+        snap => {
+          const arr = snap.docs.map(normalize)
+          setRows(arr)
+          setUsingFallback(false)
+          setErr(null)
+        },
+        e => {
+          // Detect "requires an index" and fall back
+          const msg = (e?.message || "").toLowerCase()
+          if (msg.includes("requires an index")) {
+            if (unsubRef.current) unsubRef.current()
+            unsubRef.current = subscribeFallback()
+            setUsingFallback(true)
+            return
+          }
+          setErr(e)
+        }
+      )
+    }
+
+    function subscribeFallback() {
+      const q = query(collection(db, "standards"), orderBy("tier"))
+      return onSnapshot(
+        q,
+        snap => {
+          const arr = snap.docs.map(normalize).sort((a,b) =>
+            (a.tier||"").localeCompare(b.tier||"") ||
+            (a.category||"").localeCompare(b.category||"") ||
+            (a.title||"").localeCompare(b.title||"")
+          )
+          setRows(arr)
+          setErr(null)
+        },
+        e => setErr(e)
+      )
+    }
+
+    // Start with primary
+    unsubRef.current = subscribePrimary()
+    return () => { if (unsubRef.current) unsubRef.current() }
   }, [])
 
-  // checkoffs for selected uid
-  useEffect(() => {
-    if (!targetUid) return
-    const unsub = onSnapshot(
-      collection(db, "profiles", targetUid, "checkoffs"),
-      snap => {
-        const map = {}
-        snap.forEach(d => map[d.id] = !!d.data().done)
-        setChecks(map)
-      },
-      e => setErr(e)
-    )
-    return unsub
-  }, [targetUid])
-
-  // visible list for the table (respects filters)
-  const filtered = useMemo(() => {
-    const ql = q.trim().toLowerCase()
-    return standards
-      .filter(s => s.active !== false)
-      .filter(s => tierFilter === "all" ? true : (s.tier === tierFilter))
-      .filter(s => !ql ? true :
-        (s.title || "").toLowerCase().includes(ql) ||
-        (s.category || "").toLowerCase().includes(ql)
-      )
-  }, [standards, tierFilter, q])
-
-  // progress (uses ALL active standards, not just filtered)
-  const activeByTier = useMemo(() => {
-    const obj = Object.fromEntries(TIERS.map(t => [t, []]))
-    standards.forEach(s => {
-      if (s.active === false) return
-      const t = s.tier || "committed"
-      if (!obj[t]) obj[t] = []
-      obj[t].push(s)
+  // group by tier
+  const byTier = useMemo(() => {
+    const map = Object.fromEntries(TIERS.map(t => [t, []]))
+    rows.forEach(r => {
+      const t = r.tier || "committed"
+      if (!map[t]) map[t] = []
+      map[t].push(r)
     })
-    return obj
-  }, [standards])
+    return map
+  }, [rows])
 
-  const progress = useMemo(() => {
-    const tierStats = {}
-    let totalMax = 0, totalVal = 0
-    for (const t of TIERS) {
-      const list = activeByTier[t] || []
-      const max = list.length
-      const val = list.reduce((a, s) => a + (checks[s.id] ? 1 : 0), 0)
-      tierStats[t] = { val, max }
-      totalMax += max
-      totalVal += val
-    }
-    return { tierStats, total: { val: totalVal, max: totalMax } }
-  }, [activeByTier, checks])
+  function toggleTier(tier){
+    setExpanded(prev => {
+      const next = new Set(prev)
+      next.has(tier) ? next.delete(tier) : next.add(tier)
+      return next
+    })
+  }
 
-  const doneCount = filtered.reduce((a, s) => a + (checks[s.id] ? 1 : 0), 0)
-
-  async function toggle(standardId, next){
-    if (!targetUid) return
+  async function addStandard(e){
+    e.preventDefault()
+    if (!isOwner || !newTitle.trim()) return
     try{
-      await setDoc(
-        doc(db, "profiles", targetUid, "checkoffs", standardId),
-        { done: next, updatedAt: serverTimestamp() },
-        { merge: true }
-      )
+      setBusy("add")
+      await addDoc(collection(db, "standards"), {
+        title: newTitle.trim(),
+        tier: newTier,                 // correct key
+        category: newCategory,         // correct key
+        active: true,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      })
+      setNewTitle("")
     }catch(e){
-      alert(`Failed to save: ${e.code || e.message}`)
+      alert(`Add failed: ${e.code || e.message}`)
+    }finally{
+      setBusy(null)
+    }
+  }
+
+  async function saveRow(r){
+    if (!isOwner) return
+    const patch = {
+      title: (r._title ?? r.title)?.trim() || r.title,
+      category: (r._category ?? r.category) || "strength", // correct key
+      updatedAt: serverTimestamp(),
+    }
+    if (r._tier) patch.tier = r._tier
+    try{
+      setBusy(r.id)
+      await updateDoc(doc(db, "standards", r.id), patch)
+    }catch(e){
+      alert(`Save failed: ${e.code || e.message}`)
+    }finally{
+      setBusy(null)
+    }
+  }
+
+  async function toggleActive(r, next){
+    if (!isOwner) return
+    try{
+      setBusy(r.id)
+      await setDoc(doc(db, "standards", r.id), { active: next, updatedAt: serverTimestamp() }, { merge:true })
+    }catch(e){
+      alert(`Update failed: ${e.code || e.message}`)
+    }finally{
+      setBusy(null)
+    }
+  }
+
+  async function removeRow(id){
+    if (!isOwner) return
+    if (!confirm("Delete this standard? (Existing user checkoffs for it will remain)")) return
+    try{
+      setBusy(id)
+      await deleteDoc(doc(db, "standards", id))
+    }catch(e){
+      alert(`Delete failed: ${e.code || e.message}`)
+    }finally{
+      setBusy(null)
+    }
+  }
+
+  function setLocal(id, patch){
+    setRows(curr => curr.map(r => r.id === id ? ({ ...r, ...patch }) : r))
+  }
+
+  // Seed defaults into ALL tiers (skips exact duplicates by (tier+title))
+  async function seedDefaults(){
+    if (!isOwner) return
+    if (!confirm("Seed the default standards into ALL tiers?")) return
+    try{
+      setBusy("seed")
+
+      const existing = new Set(rows.map(r => `${(r.tier||"").toLowerCase()}|${(r.title||"").toLowerCase()}`))
+      const batch = writeBatch(db)
+      TIERS.forEach(tier => {
+        Object.entries(DEFAULTS).forEach(([category, arr]) => {
+          arr.forEach(title => {
+            const key = `${tier}|${title.toLowerCase()}`
+            if (existing.has(key)) return
+            const ref = doc(collection(db, "standards"))
+            batch.set(ref, {
+              title,
+              tier,                 // correct key
+              category,             // correct key
+              active: true,
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            })
+          })
+        })
+      })
+      await batch.commit()
+      alert("Defaults seeded.")
+    }catch(e){
+      alert(`Seed failed: ${e.code || e.message}`)
+    }finally{
+      setBusy(null)
     }
   }
 
   return (
     <div className="container vstack">
-      {/* Header & controls */}
+      {/* Header */}
       <div className="card vstack">
         <div className="hstack" style={{justifyContent:"space-between", gap:12, flexWrap:"wrap"}}>
           <div className="hstack" style={{gap:8, flexWrap:"wrap"}}>
-            <span className="badge">Checkoffs</span>
-            <span className="badge">Visible done: <b>{doneCount}</b>/<b>{filtered.length}</b></span>
+            <span className="badge">Standards</span>
+            <span className="badge">Total: <b>{rows.length}</b></span>
+            {usingFallback && <span className="badge" title="Using client-side sort because index not available">fallback mode</span>}
           </div>
-          <div className="hstack" style={{gap:8, flexWrap:"wrap"}}>
-            <input
-              placeholder="Search title/category"
-              value={q}
-              onChange={e=>setQ(e.target.value)}
-              style={{background:"#0b1426", color:"#e5e7eb", border:"1px solid #1f2937",
-                      borderRadius:8, padding:"8px 10px", minWidth:200}}
-            />
-            <select value={tierFilter} onChange={e=>setTierFilter(e.target.value)} style={select}>
-              <option value="all">All tiers</option>
-              {TIERS.map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
-            {isMentor && (
-              <select
-                value={targetUid || ""}
-                onChange={e=>setTargetUid(e.target.value)}
-                style={select}
-                title="Member"
-              >
-                <option value="" disabled>Select member…</option>
-                {members.map(m => <option key={m.id} value={m.id}>{m.displayName || m.id}</option>)}
-              </select>
-            )}
-          </div>
+          {isOwner && (
+            <div className="hstack" style={{gap:8}}>
+              <button className="btn" onClick={()=>setExpanded(new Set())}>Collapse all</button>
+              <button className="btn" onClick={()=>setExpanded(new Set(TIERS))}>Expand all</button>
+              <button className="btn primary" disabled={busy==="seed"} onClick={seedDefaults}>
+                {busy==="seed" ? "Seeding…" : "Seed defaults"}
+              </button>
+            </div>
+          )}
         </div>
-
-        {/* Progress bars */}
-        <div className="vstack" style={{gap:10, marginTop:10}}>
-          <ProgressBar value={progress.total.val} max={progress.total.max} label="Overall progress" />
-          <div className="hstack" style={{gap:16, flexWrap:"wrap"}}>
-            {TIERS.map(t => (
-              <ProgressBar
-                key={t}
-                value={progress.tierStats[t]?.val || 0}
-                max={progress.tierStats[t]?.max || 0}
-                label={`${t} tier`}
-              />
-            ))}
-          </div>
-        </div>
-
-        {!isMentor && (
-          <p style={{color:"#9ca3af", margin:0, fontSize:13, marginTop:6}}>
-            You’re viewing your own checkoffs.
+        {!isOwner && (
+          <p style={{color:"#9ca3af", margin:0, fontSize:13}}>
+            Only the <b>owner</b> can create or edit standards.
           </p>
         )}
       </div>
+
+      {/* Add new */}
+      {isOwner && (
+        <div className="card vstack">
+          <span className="badge">Add standard</span>
+          <form onSubmit={addStandard} className="hstack" style={{gap:8, flexWrap:"wrap"}}>
+            <input
+              placeholder="Title (e.g., Deadlift)"
+              value={newTitle}
+              onChange={e=>setNewTitle(e.target.value)}
+              style={{...input, minWidth:260}}
+            />
+            <select value={newCategory} onChange={e=>setNewCategory(e.target.value)} style={select}>
+              {Object.keys(DEFAULTS).map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <select value={newTier} onChange={e=>setNewTier(e.target.value)} style={select}>
+              {TIERS.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+            <button className="btn primary" disabled={!newTitle.trim() || busy==="add"}>
+              {busy==="add" ? "Saving…" : "Add"}
+            </button>
+          </form>
+        </div>
+      )}
+
+      {/* Per-tier accordions */}
+      {TIERS.map(tier => {
+        const list = (byTier[tier] || []).sort((a,b) =>
+          (a.category||"").localeCompare(b.category||"") ||
+          (a.title||"").localeCompare(b.title||"")
+        )
+        const open = expanded.has(tier)
+        const activeCount = list.filter(s => s.active !== false).length
+        return (
+          <div key={tier} className="card vstack">
+            <button
+              className="btn"
+              onClick={()=>toggleTier(tier)}
+              style={{alignSelf:"flex-start"}}
+              aria-expanded={open}
+              aria-controls={`tier-${tier}`}
+            >
+              {open ? "▼" : "►"} {tier} <span className="badge" style={{marginLeft:8}}>Active: {activeCount}</span>
+            </button>
+
+            {open && (
+              <div id={`tier-${tier}`} style={{paddingTop:8}}>
+                {list.length === 0 ? (
+                  <p style={{color:"#9ca3af"}}>No standards yet in this tier.</p>
+                ) : (
+                  <div style={{overflowX:"auto"}}>
+                    <table style={{width:"100%", borderCollapse:"collapse"}}>
+                      <thead>
+                        <tr style={{background:"#0f1a30"}}>
+                          <th style={th}>Title</th>
+                          <th style={th}>Category</th>
+                          <th style={th}>Active</th>
+                          {isOwner ? <th style={th}></th> : null}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {list.map(r => {
+                          const editTitle = r._title ?? r.title
+                          const editCat   = r._category ?? r.category
+                          return (
+                            <tr key={r.id} style={{borderTop:"1px solid #1f2937"}}>
+                              <td style={td}>
+                                {!isOwner ? r.title : (
+                                  <input value={editTitle} onChange={e=>setLocal(r.id, { _title: e.target.value })} style={{...input, minWidth:280}} />
+                                )}
+                              </td>
+                              <td style={td}>
+                                {!isOwner ? (r.category || "—") : (
+                                  <select value={editCat || "strength"} onChange={e=>setLocal(r.id, { _category: e.target.value })} style={select}>
+                                    {Object.keys(DEFAULTS).map(c => <option key={c} value={c}>{c}</option>)}
+                                  </select>
+                                )}
+                              </td>
+                              <td style={td}>
+                                {!isOwner ? (
+                                  <span className="badge">{r.active === false ? "inactive" : "active"}</span>
+                                ) : (
+                                  <label className="hstack" style={{gap:8}}>
+                                    <input
+                                      type="checkbox"
+                                      checked={r.active !== false}
+                                      onChange={e=>toggleActive(r, e.target.checked)}
+                                      disabled={busy === r.id}
+                                    />
+                                    <span>{r.active !== false ? "Active" : "Inactive"}</span>
+                                  </label>
+                                )}
+                              </td>
+                              {isOwner ? (
+                                <td style={td} className="hstack" >
+                                  <button className="btn primary" disabled={busy===r.id} onClick={()=>saveRow(r)}>Save</button>
+                                  <button className="btn" disabled={busy===r.id} onClick={()=>removeRow(r.id)}>Delete</button>
+                                </td>
+                              ) : null}
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )
+      })}
 
       {err && (
         <div className="card" style={{borderColor:"#7f1d1d", background:"#1f1315", color:"#fecaca"}}>
           Error: {String(err.message || err)}
         </div>
       )}
-
-      {/* List */}
-      <div className="card vstack">
-        {filtered.length === 0 ? (
-          <p style={{color:"#9ca3af"}}>No standards yet.</p>
-        ) : (
-          <ul className="vstack" style={{listStyle:"none", margin:0, padding:0}}>
-            {filtered.map(s => (
-              <li key={s.id} className="hstack" style={{justifyContent:"space-between", borderBottom:"1px solid #1f2937", padding:"8px 0"}}>
-                <div className="vstack" style={{gap:4}}>
-                  <div className="hstack" style={{gap:8, flexWrap:"wrap"}}>
-                    <b>{s.title}</b>
-                    <span className="badge">{s.tier}</span>
-                    {s.category && <span className="badge">{s.category}</span>}
-                  </div>
-                </div>
-                <label className="hstack" style={{gap:8}}>
-                  <input
-                    type="checkbox"
-                    checked={!!checks[s.id]}
-                    onChange={e=>toggle(s.id, e.target.checked)}
-                  />
-                  <span>{checks[s.id] ? "Done" : "Not done"}</span>
-                </label>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
     </div>
   )
-}
-
-const select = {
-  background:"#0b1426", color:"#e5e7eb", border:"1px solid #1f2937",
-  borderRadius:8, padding:"8px 10px", minWidth:160
 }
