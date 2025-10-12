@@ -31,7 +31,8 @@ function ProgressBar({ value = 0, max = 1, label }) {
 
 export default function Checkoffs(){
   const { user, profile } = useAuth()
-  const isMentor = ["mentor","admin","owner"].includes(profile?.role || "member")
+  const role = profile?.role || "member"
+  const isStaff = ["mentor","admin","owner"].includes(role) // <-- only these can edit
 
   const [members, setMembers] = useState([])
   const [targetUid, setTargetUid] = useState(null)
@@ -45,9 +46,13 @@ export default function Checkoffs(){
   const [usingFallback, setUsingFallback] = useState(false)
   const unsubRef = useRef(null)
 
-  // Load members for selector (mentors/admins/owner)
+  // Load members for selector (staff only)
   useEffect(() => {
-    if (!isMentor) { setMembers([]); setTargetUid(user?.uid || null); return }
+    if (!isStaff) {
+      setMembers([])
+      setTargetUid(user?.uid || null)
+      return
+    }
     const unsub = onSnapshot(
       query(collection(db, "profiles"), orderBy("displayName")),
       snap => {
@@ -58,11 +63,11 @@ export default function Checkoffs(){
       e => setErr(e)
     )
     return unsub
-  }, [isMentor, user, targetUid])
+  }, [isStaff, user, targetUid])
 
   useEffect(() => {
-    if (!isMentor && user && !targetUid) setTargetUid(user.uid)
-  }, [isMentor, user, targetUid])
+    if (!isStaff && user && !targetUid) setTargetUid(user.uid)
+  }, [isStaff, user, targetUid])
 
   // Subscribe to standards with auto-fallback if composite index missing
   useEffect(() => {
@@ -91,7 +96,6 @@ export default function Checkoffs(){
         e => {
           const msg = (e?.message || "").toLowerCase()
           if (msg.includes("requires an index")) {
-            // switch to fallback
             if (unsubRef.current) unsubRef.current()
             unsubRef.current = subscribeFallback()
             setUsingFallback(true)
@@ -123,7 +127,7 @@ export default function Checkoffs(){
     return () => { if (unsubRef.current) unsubRef.current() }
   }, [])
 
-  // Checkoffs for selected uid
+  // Subscribe to checkoffs for currently selected uid
   useEffect(() => {
     if (!targetUid) return
     const unsub = onSnapshot(
@@ -150,7 +154,7 @@ export default function Checkoffs(){
       )
   }, [standards, tierFilter, q])
 
-  // Progress across ALL active standards
+  // Progress across ALL active standards (for selected user)
   const activeByTier = useMemo(() => {
     const obj = Object.fromEntries(TIERS.map(t => [t, []]))
     standards.forEach(s => {
@@ -178,7 +182,12 @@ export default function Checkoffs(){
 
   const doneCount = filtered.reduce((a, s) => a + (checks[s.id] ? 1 : 0), 0)
 
+  // Only staff may write
   async function toggle(standardId, next){
+    if (!isStaff) {
+      alert("Only mentors/admin/owner can update checkoffs.")
+      return
+    }
     if (!targetUid) return
     try{
       await setDoc(
@@ -213,7 +222,9 @@ export default function Checkoffs(){
               <option value="all">All tiers</option>
               {TIERS.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
-            {isMentor && (
+
+            {/* Member picker visible only to staff; members see themselves */}
+            {isStaff ? (
               <select
                 value={targetUid || ""}
                 onChange={e=>setTargetUid(e.target.value)}
@@ -223,6 +234,10 @@ export default function Checkoffs(){
                 <option value="" disabled>Select member…</option>
                 {members.map(m => <option key={m.id} value={m.id}>{m.displayName || m.id}</option>)}
               </select>
+            ) : (
+              <span className="badge" title="You can view your own checkoffs">
+                Viewing: {profile?.displayName || user?.email || "Me"}
+              </span>
             )}
           </div>
         </div>
@@ -242,9 +257,9 @@ export default function Checkoffs(){
           </div>
         </div>
 
-        {!isMentor && (
+        {!isStaff && (
           <p style={{color:"#9ca3af", margin:0, fontSize:13}}>
-            You’re viewing your own checkoffs.
+            Only mentors/admin/owner can change checkoffs. You can view your status here.
           </p>
         )}
       </div>
@@ -275,6 +290,8 @@ export default function Checkoffs(){
                     type="checkbox"
                     checked={!!checks[s.id]}
                     onChange={e=>toggle(s.id, e.target.checked)}
+                    disabled={!isStaff}
+                    title={isStaff ? "Toggle checkoff" : "Only mentors/admin/owner can change this"}
                   />
                   <span>{checks[s.id] ? "Done" : "Not done"}</span>
                 </label>
