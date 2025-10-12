@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import useAuth from "../lib/auth"
 import { db } from "../lib/firebase"
 import {
-  collection, doc, onSnapshot, orderBy, query,
+  addDoc, collection, doc, onSnapshot, orderBy, query,
   serverTimestamp, setDoc
 } from "firebase/firestore"
 
@@ -32,7 +32,7 @@ function ProgressBar({ value = 0, max = 1, label }) {
 export default function Checkoffs(){
   const { user, profile } = useAuth()
   const role = profile?.role || "member"
-  const isStaff = ["mentor","admin","owner"].includes(role) // <-- only these can edit
+  const isStaff = ["mentor","admin","owner"].includes(role)
 
   const [members, setMembers] = useState([])
   const [targetUid, setTargetUid] = useState(null)
@@ -46,7 +46,13 @@ export default function Checkoffs(){
   const [usingFallback, setUsingFallback] = useState(false)
   const unsubRef = useRef(null)
 
-  // Load members for selector (staff only)
+  // audit UI state
+  const [expanded, setExpanded] = useState({})     // {standardId: boolean}
+  const [notes, setNotes] = useState({})           // {standardId: string}
+  const [histories, setHistories] = useState({})   // {standardId: array of events}
+  const historyUnsubs = useRef({})                 // {standardId: unsub}
+
+  // Load members (staff can pick any; members are stuck to themselves)
   useEffect(() => {
     if (!isStaff) {
       setMembers([])
@@ -69,7 +75,7 @@ export default function Checkoffs(){
     if (!isStaff && user && !targetUid) setTargetUid(user.uid)
   }, [isStaff, user, targetUid])
 
-  // Subscribe to standards with auto-fallback if composite index missing
+  // Subscribe standards (with index fallback)
   useEffect(() => {
     function normalize(docSnap) {
       const data = docSnap.data() || {}
@@ -127,7 +133,7 @@ export default function Checkoffs(){
     return () => { if (unsubRef.current) unsubRef.current() }
   }, [])
 
-  // Subscribe to checkoffs for currently selected uid
+  // Subscribe to selected member's checkoffs
   useEffect(() => {
     if (!targetUid) return
     const unsub = onSnapshot(
@@ -142,7 +148,7 @@ export default function Checkoffs(){
     return unsub
   }, [targetUid])
 
-  // Filtered list for UI
+  // Derived data
   const filtered = useMemo(() => {
     const ql = q.trim().toLowerCase()
     return standards
@@ -154,7 +160,6 @@ export default function Checkoffs(){
       )
   }, [standards, tierFilter, q])
 
-  // Progress across ALL active standards (for selected user)
   const activeByTier = useMemo(() => {
     const obj = Object.fromEntries(TIERS.map(t => [t, []]))
     standards.forEach(s => {
@@ -182,7 +187,7 @@ export default function Checkoffs(){
 
   const doneCount = filtered.reduce((a, s) => a + (checks[s.id] ? 1 : 0), 0)
 
-  // Only staff may write
+  // Toggle (staff only) + write audit event
   async function toggle(standardId, next){
     if (!isStaff) {
       alert("Only mentors/admin/owner can update checkoffs.")
@@ -190,15 +195,62 @@ export default function Checkoffs(){
     }
     if (!targetUid) return
     try{
+      // 1) update checkoff
       await setDoc(
         doc(db, "profiles", targetUid, "checkoffs", standardId),
         { done: next, updatedAt: serverTimestamp() },
         { merge: true }
       )
+      // 2) add audit event
+      await addDoc(
+        collection(db, "profiles", targetUid, "checkoffs", standardId, "history"),
+        {
+          byUid: user?.uid || null,
+          byName: profile?.displayName || user?.email || "staff",
+          newValue: !!next,
+          note: (notes[standardId] || "").trim(),
+          at: serverTimestamp(),
+        }
+      )
+      // clear the note input for this row
+      setNotes(prev => ({ ...prev, [standardId]: "" }))
     }catch(e){
       alert(`Failed to save: ${e.code || e.message}`)
     }
   }
+
+  // Expand/collapse history; start/stop subscription per row
+  function toggleHistory(standardId){
+    setExpanded(prev => {
+      const nextOpen = !prev[standardId]
+      // subscribe/unsubscribe on change
+      if (nextOpen) {
+        if (!historyUnsubs.current[standardId]) {
+          const qy = query(
+            collection(db, "profiles", targetUid, "checkoffs", standardId, "history"),
+            orderBy("at", "desc")
+          )
+          historyUnsubs.current[standardId] = onSnapshot(qy, snap => {
+            const rows = snap.docs.map(d => ({ id: d.id, ...(d.data()||{}) }))
+            setHistories(prevH => ({ ...prevH, [standardId]: rows }))
+          })
+        }
+      } else {
+        if (historyUnsubs.current[standardId]) {
+          historyUnsubs.current[standardId]() // unsub
+          delete historyUnsubs.current[standardId]
+        }
+      }
+      return { ...prev, [standardId]: nextOpen }
+    })
+  }
+
+  // Cleanup all history subscriptions on unmount
+  useEffect(() => {
+    return () => {
+      Object.values(historyUnsubs.current).forEach(unsub => unsub && unsub())
+    }
+  }, [])
 
   return (
     <div className="container vstack">
@@ -223,7 +275,6 @@ export default function Checkoffs(){
               {TIERS.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
 
-            {/* Member picker visible only to staff; members see themselves */}
             {isStaff ? (
               <select
                 value={targetUid || ""}
@@ -276,27 +327,80 @@ export default function Checkoffs(){
           <p style={{color:"#9ca3af"}}>No standards yet.</p>
         ) : (
           <ul className="vstack" style={{listStyle:"none", margin:0, padding:0}}>
-            {filtered.map(s => (
-              <li key={s.id} className="hstack" style={{justifyContent:"space-between", borderBottom:"1px solid #1f2937", padding:"8px 0"}}>
-                <div className="vstack" style={{gap:4}}>
-                  <div className="hstack" style={{gap:8, flexWrap:"wrap"}}>
-                    <b>{s.title}</b>
-                    <span className="badge">{s.tier}</span>
-                    {s.category && <span className="badge">{s.category}</span>}
+            {filtered.map(s => {
+              const open = !!expanded[s.id]
+              const hist = histories[s.id] || []
+              return (
+                <li key={s.id} style={{borderBottom:"1px solid #1f2937", padding:"10px 0"}}>
+                  <div className="hstack" style={{justifyContent:"space-between", gap:12, flexWrap:"wrap"}}>
+                    <div className="vstack" style={{gap:4}}>
+                      <div className="hstack" style={{gap:8, flexWrap:"wrap"}}>
+                        <b>{s.title}</b>
+                        <span className="badge">{s.tier}</span>
+                        {s.category && <span className="badge">{s.category}</span>}
+                      </div>
+                      {isStaff && (
+                        <div className="hstack" style={{gap:8}}>
+                          <input
+                            placeholder="Optional note for audit (e.g., 'Verified on 10/11')"
+                            value={notes[s.id] || ""}
+                            onChange={e => setNotes(prev => ({ ...prev, [s.id]: e.target.value }))}
+                            style={{background:"#0b1426", color:"#e5e7eb", border:"1px solid #1f2937",
+                                    borderRadius:8, padding:"6px 8px", minWidth:260}}
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="hstack" style={{gap:8}}>
+                      <button className="btn" onClick={()=>toggleHistory(s.id)}>
+                        {open ? "Hide History" : "History"}
+                      </button>
+                      <label className="hstack" style={{gap:8}}>
+                        <input
+                          type="checkbox"
+                          checked={!!checks[s.id]}
+                          onChange={e=>toggle(s.id, e.target.checked)}
+                          disabled={!isStaff}
+                          title={isStaff ? "Toggle checkoff" : "Only mentors/admin/owner can change this"}
+                        />
+                        <span>{checks[s.id] ? "Done" : "Not done"}</span>
+                      </label>
+                    </div>
                   </div>
-                </div>
-                <label className="hstack" style={{gap:8}}>
-                  <input
-                    type="checkbox"
-                    checked={!!checks[s.id]}
-                    onChange={e=>toggle(s.id, e.target.checked)}
-                    disabled={!isStaff}
-                    title={isStaff ? "Toggle checkoff" : "Only mentors/admin/owner can change this"}
-                  />
-                  <span>{checks[s.id] ? "Done" : "Not done"}</span>
-                </label>
-              </li>
-            ))}
+
+                  {/* History panel */}
+                  {open && (
+                    <div style={{marginTop:8, overflowX:"auto"}}>
+                      {hist.length === 0 ? (
+                        <p style={{color:"#9ca3af", margin:0}}>No history yet.</p>
+                      ) : (
+                        <table style={{width:"100%", borderCollapse:"collapse"}}>
+                          <thead>
+                            <tr style={{background:"#0f1a30"}}>
+                              <th style={th}>When</th>
+                              <th style={th}>By</th>
+                              <th style={th}>Value</th>
+                              <th style={th}>Note</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {hist.map(ev => (
+                              <tr key={ev.id} style={{borderTop:"1px solid #1f2937"}}>
+                                <td style={td}>{ev.at?.toDate ? ev.at.toDate().toLocaleString() : "—"}</td>
+                                <td style={td}>{ev.byName || ev.byUid || "—"}</td>
+                                <td style={td}>{ev.newValue ? "Done" : "Not done"}</td>
+                                <td style={td}>{ev.note || "—"}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+                  )}
+                </li>
+              )
+            })}
           </ul>
         )}
       </div>
@@ -304,6 +408,8 @@ export default function Checkoffs(){
   )
 }
 
+const th = { textAlign:"left", padding:"10px 12px", fontSize:12, color:"#9ca3af" }
+const td = { padding:"10px 12px" }
 const select = {
   background:"#0b1426", color:"#e5e7eb", border:"1px solid #1f2937",
   borderRadius:8, padding:"8px 10px", minWidth:160
