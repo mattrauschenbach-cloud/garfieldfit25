@@ -3,8 +3,8 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { db } from "../lib/firebase"
 import useAuth from "../lib/auth"
 import {
-  collection, collectionGroup, doc, getDoc, onSnapshot,
-  orderBy, query, serverTimestamp, setDoc
+  collection, doc, getDoc, onSnapshot, orderBy, query,
+  serverTimestamp, setDoc
 } from "firebase/firestore"
 
 const TIERS = ["committed", "developmental", "advanced", "elite"]
@@ -30,10 +30,13 @@ export default function StandardsLeaderboard(){
   // Standards + fallback sort if multi-order requires index
   const [standards, setStandards] = useState([])
   const [usingFallback, setUsingFallback] = useState(false)
-  const unsubRef = useRef(null)
+  const standardsUnsub = useRef(null)
 
   // Records map: { standardId: { holderUid, holderName, value, unit, notes, updatedAt, verifiedByName } }
   const [records, setRecords] = useState({})
+
+  // Per-standard record listeners
+  const recordUnsubs = useRef({}) // { stdId: () => void }
 
   // Members list for owner picker
   const [members, setMembers] = useState([])
@@ -58,7 +61,7 @@ export default function StandardsLeaderboard(){
       e => setErr(e)
     )
     return unsub
-  }, [isOwner])
+  }, [isOwner]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---- Standards subscription (with index fallback) ----
   useEffect(() => {
@@ -84,14 +87,12 @@ export default function StandardsLeaderboard(){
           setStandards(arr)
           setUsingFallback(false)
           setErr(null)
-          // initialize selected standard
-          if (!selStdId && arr.length) setSelStdId(arr[0].id)
         },
         e => {
           const msg = (e?.message || "").toLowerCase()
           if (msg.includes("requires an index")) {
-            if (unsubRef.current) unsubRef.current()
-            unsubRef.current = subFallback()
+            if (standardsUnsub.current) standardsUnsub.current()
+            standardsUnsub.current = subFallback()
             setUsingFallback(true)
             return
           }
@@ -112,35 +113,41 @@ export default function StandardsLeaderboard(){
           )
           setStandards(arr)
           setErr(null)
-          if (!selStdId && arr.length) setSelStdId(arr[0].id)
         },
         e => setErr(e)
       )
     }
 
-    unsubRef.current = subPrimary()
-    return () => { if (unsubRef.current) unsubRef.current() }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    standardsUnsub.current = subPrimary()
+    return () => { if (standardsUnsub.current) standardsUnsub.current() }
   }, [])
 
-  // ---- Records subscription for all standards ----
+  // ---- When standards list changes, (re)subscribe to each /record/current doc ----
   useEffect(() => {
-    // Using a collectionGroup so we don't attach a listener per standard.
-    // Path: /standards/{id}/record/current
-    const qy = query(collectionGroup(db, "record"))
-    const unsub = onSnapshot(qy, async snap => {
-      // Build map by parent standard id
-      const recMap = {}
-      for (const d of snap.docs) {
-        // parent path: standards/{stdId}/record/{recId}
-        const segments = d.ref.path.split("/")
-        const stdId = segments[1] // ["standards", "{id}", "record", "{recId}"]
-        recMap[stdId] = { id: d.id, ...(d.data()||{}) }
-      }
-      setRecords(recMap)
-    }, e => setErr(e))
-    return unsub
-  }, [])
+    // Unsub removed standards
+    const currentIds = new Set(standards.map(s => s.id))
+    Object.entries(recordUnsubs.current).forEach(([stdId, unsub]) => {
+      if (!currentIds.has(stdId)) { unsub(); delete recordUnsubs.current[stdId] }
+    })
+
+    // Sub new standards
+    standards.forEach(s => {
+      if (recordUnsubs.current[s.id]) return
+      const ref = doc(db, "standards", s.id, "record", "current")
+      const unsub = onSnapshot(ref, snap => {
+        setRecords(prev => ({
+          ...prev,
+          [s.id]: snap.exists() ? { id: snap.id, ...(snap.data()||{}) } : undefined
+        }))
+      }, e => setErr(e))
+      recordUnsubs.current[s.id] = unsub
+    })
+
+    // init dropdown default
+    if (!selStdId && standards.length) setSelStdId(standards[0].id)
+
+    return () => {} // individual unsubs handled above
+  }, [standards, selStdId])
 
   // Derived: standards grouped by tier
   const grouped = useMemo(() => {
@@ -161,7 +168,6 @@ export default function StandardsLeaderboard(){
 
   useEffect(() => {
     if (!selectedStd) return
-    // set unit hint if empty
     if (!unit && selectedStd.unit) setUnit(selectedStd.unit)
   }, [selectedStd, unit])
 
@@ -220,8 +226,8 @@ export default function StandardsLeaderboard(){
               <select value={selUid} onChange={e=>setSelUid(e.target.value)} style={select} title="Member">
                 <option value="" disabled>Select member…</option>
                 {members.map(m => (
-                  <option key={m.id} value={m.id}>{m.displayName || m.id}</option>
-                ))}
+                  <option key={m.id} value={m.id}>{m.displayName || m.id}</option>)
+                )}
               </select>
 
               <input
