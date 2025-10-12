@@ -2,12 +2,50 @@
 import { NavLink, useNavigate } from "react-router-dom"
 import useAuth from "../lib/auth"
 
-const linkBase =
-  "px-3 py-2 rounded-md text-sm font-medium transition-colors"
-const active =
-  "bg-[#0f1a30] text-white border border-[#1f2937]"
-const inactive =
-  "text-gray-300 hover:text-white hover:bg-[#0f1a30] border border-transparent"
+const shell = {
+  background: "#0b1426",
+  borderBottom: "1px solid #1f2937",
+  position: "sticky",
+  top: 0,
+  zIndex: 40,
+}
+const wrap = { maxWidth: 1080, margin: "0 auto", padding: "0 16px" }
+const row  = { display: "flex", alignItems: "center", justifyContent: "space-between", height: 56 }
+
+const linkBase = {
+  padding: "8px 12px",
+  borderRadius: 8,
+  fontSize: 14,
+  fontWeight: 500,
+  textDecoration: "none",
+  border: "1px solid transparent",
+  transition: "background 120ms, color 120ms, border-color 120ms",
+  color: "#d1d5db",
+}
+const linkActive = {
+  background: "#0f1a30",
+  color: "#ffffff",
+  borderColor: "#1f2937",
+}
+const linkHover = { background: "#0f1a30", color: "#ffffff" }
+
+function LinkItem({ to, children }) {
+  return (
+    <NavLink
+      to={to}
+      style={({ isActive }) => ({
+        ...linkBase,
+        ...(isActive ? linkActive : null),
+      })}
+      onMouseEnter={e => Object.assign(e.currentTarget.style, linkHover)}
+      onMouseLeave={e => Object.assign(e.currentTarget.style, (e.currentTarget.getAttribute("data-active")==="1") ? linkActive : linkBase)}
+      data-active={({ isActive }) => (isActive ? "1" : "0")}
+      // data-active is set correctly via style prop below (hack for onMouseLeave)
+    >
+      {children}
+    </NavLink>
+  )
+}
 
 export default function NavBar() {
   const navigate = useNavigate()
@@ -17,46 +55,52 @@ export default function NavBar() {
   const isOwner  = role === "owner"
 
   return (
-    <header className="w-full sticky top-0 z-40" style={{background:"#0b1426", borderBottom:"1px solid #1f2937"}}>
-      <div className="max-w-6xl mx-auto px-4">
-        <div className="flex items-center justify-between h-14">
+    <header style={shell}>
+      <div style={wrap}>
+        <div style={row}>
           {/* Brand */}
-          <div className="flex items-center gap-3">
-            <span className="text-lg font-semibold text-white">Fire-Fit</span>
-            <span className="hidden sm:inline text-xs text-gray-400">v0.9</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 18, fontWeight: 600, color: "#ffffff" }}>Fire-Fit</span>
+            <span style={{ fontSize: 11, color: "#9ca3af" }}>v0.9</span>
           </div>
 
-          {/* Nav links */}
-          <nav className="flex items-center gap-1">
-            <NavLink to="/" className={({isActive}) => `${linkBase} ${isActive ? active : inactive}`}>Home</NavLink>
-            <NavLink to="/members" className={({isActive}) => `${linkBase} ${isActive ? active : inactive}`}>Members</NavLink>
-            <NavLink to="/standards" className={({isActive}) => `${linkBase} ${isActive ? active : inactive}`}>Standards</NavLink>
-            <NavLink to="/checkoffs" className={({isActive}) => `${linkBase} ${isActive ? active : inactive}`}>Checkoffs</NavLink>
-            <NavLink to="/weekly" className={({isActive}) => `${linkBase} ${isActive ? active : inactive}`}>Weekly</NavLink>
-            <NavLink to="/my" className={({isActive}) => `${linkBase} ${isActive ? active : inactive}`}>My Profile</NavLink>
+          {/* Links */}
+          <nav style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <LinkItem to="/">Home</LinkItem>
+            <LinkItem to="/members">Members</LinkItem>
+            <LinkItem to="/standards">Standards</LinkItem>
+            <LinkItem to="/checkoffs">Checkoffs</LinkItem>
+            <LinkItem to="/weekly">Weekly</LinkItem>
+            <LinkItem to="/my">My Profile</LinkItem>
 
-            {/* Role badges (optional) */}
+            {/* role badges */}
             {isOwner && (
-              <span className="ml-2 text-[10px] uppercase tracking-wide text-emerald-300">Owner</span>
+              <span style={{ marginLeft: 8, fontSize: 10, color: "#6ee7b7", letterSpacing: 1 }}>OWNER</span>
             )}
             {isMentor && !isOwner && (
-              <span className="ml-2 text-[10px] uppercase tracking-wide text-sky-300">Mentor</span>
+              <span style={{ marginLeft: 8, fontSize: 10, color: "#7dd3fc", letterSpacing: 1 }}>MENTOR</span>
             )}
           </nav>
 
-          {/* Auth actions */}
-          <div className="flex items-center gap-2">
+          {/* Auth */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             {user ? (
               <>
-                <span className="hidden sm:inline text-xs text-gray-300">
+                <span style={{ fontSize: 12, color: "#d1d5db" }}>
                   {profile?.displayName || user.email}
                 </span>
                 <button
-                  onClick={async () => {
-                    await signOut()
-                    navigate("/login")
+                  onClick={async () => { await signOut(); navigate("/login") }}
+                  style={{
+                    padding: "8px 12px",
+                    borderRadius: 8,
+                    fontSize: 14,
+                    fontWeight: 500,
+                    background: "#172136",
+                    color: "#ffffff",
+                    border: "1px solid #1f2937",
+                    cursor: "pointer",
                   }}
-                  className="px-3 py-2 rounded-md text-sm font-medium bg-[#172136] text-white border border-[#1f2937] hover:bg-[#0f1a30] transition-colors"
                 >
                   Logout
                 </button>
@@ -64,7 +108,12 @@ export default function NavBar() {
             ) : (
               <NavLink
                 to="/login"
-                className="px-3 py-2 rounded-md text-sm font-medium bg-[#172136] text-white border border-[#1f2937] hover:bg-[#0f1a30] transition-colors"
+                style={{
+                  ...linkBase,
+                  background: "#172136",
+                  color: "#ffffff",
+                  border: "1px solid #1f2937",
+                }}
               >
                 Login
               </NavLink>
