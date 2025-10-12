@@ -65,7 +65,7 @@ export default function Checkoffs(){
     if (!isMentor && user && !targetUid) setTargetUid(user.uid)
   }, [isMentor, user, targetUid])
 
-  // standards list (normalize any old docs that might have "tier " field)
+  // standards list (normalize any old docs that might have "tier " / "category ")
   useEffect(() => {
     const unsub = onSnapshot(
       query(
@@ -77,8 +77,9 @@ export default function Checkoffs(){
       snap => {
         const arr = snap.docs.map(d => {
           const data = d.data()
-          const tier = data.tier ?? data["tier "] ?? "committed" // normalize
-          return { id: d.id, ...data, tier }
+          const tier = data.tier ?? data["tier "] ?? "committed"
+          const category = data.category ?? data["category "] ?? null
+          return { id: d.id, ...data, tier, category }
         })
         setStandards(arr)
       },
