@@ -1,124 +1,76 @@
 // src/components/NavBar.jsx
-import { NavLink, useNavigate } from "react-router-dom"
+import { Link, useLocation } from "react-router-dom"
 import useAuth from "../lib/auth"
 
-const shell = {
-  background: "#0b1426",
-  borderBottom: "1px solid #1f2937",
-  position: "sticky",
-  top: 0,
-  zIndex: 40,
+const bar = {
+  position: "sticky", top: 0, zIndex: 50,
+  background: "#0b1426", borderBottom: "1px solid #1f2937"
 }
-const wrap = { maxWidth: 1080, margin: "0 auto", padding: "0 16px" }
-const row  = { display: "flex", alignItems: "center", justifyContent: "space-between", height: 56 }
-
-const linkBase = {
-  padding: "8px 12px",
-  borderRadius: 8,
-  fontSize: 14,
-  fontWeight: 500,
-  textDecoration: "none",
-  border: "1px solid transparent",
-  transition: "background 120ms, color 120ms, border-color 120ms",
-  color: "#d1d5db",
+const wrap = {
+  maxWidth: 1100, margin: "0 auto", padding: "10px 16px",
+  display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12
 }
-const linkActive = {
-  background: "#0f1a30",
-  color: "#ffffff",
-  borderColor: "#1f2937",
+const nav = { display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }
+const link = (active) => ({
+  padding: "6px 10px", borderRadius: 8,
+  color: active ? "#fff" : "#cbd5e1",
+  background: active ? "#172136" : "transparent",
+  border: "1px solid #1f2937", textDecoration: "none"
+})
+const right = { display: "flex", alignItems: "center", gap: 10 }
+const badge = {
+  display: "inline-block", padding: "2px 8px", borderRadius: 999,
+  background: "#0f1a30", color: "#e5e7eb", fontSize: 12, border: "1px solid #1f2937"
 }
-const linkHover = { background: "#0f1a30", color: "#ffffff" }
-
-function LinkItem({ to, children }) {
-  return (
-    <NavLink
-      to={to}
-      style={({ isActive }) => ({
-        ...linkBase,
-        ...(isActive ? linkActive : null),
-      })}
-      onMouseEnter={e => Object.assign(e.currentTarget.style, linkHover)}
-      onMouseLeave={e => Object.assign(e.currentTarget.style, (e.currentTarget.getAttribute("data-active")==="1") ? linkActive : linkBase)}
-      data-active={({ isActive }) => (isActive ? "1" : "0")}
-      // data-active is set correctly via style prop below (hack for onMouseLeave)
-    >
-      {children}
-    </NavLink>
-  )
+const btn = {
+  padding: "6px 10px", borderRadius: 8,
+  background: "#172136", color: "#fff", border: "1px solid #1f2937", cursor: "pointer"
 }
 
 export default function NavBar() {
-  const navigate = useNavigate()
+  const { pathname } = useLocation()
   const { user, profile, signOut } = useAuth()
   const role = profile?.role || "member"
-  const isMentor = ["mentor","admin","owner"].includes(role)
-  const isOwner  = role === "owner"
 
   return (
-    <header style={shell}>
+    <header style={bar}>
       <div style={wrap}>
-        <div style={row}>
-          {/* Brand */}
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 18, fontWeight: 600, color: "#ffffff" }}>Fire-Fit</span>
-            <span style={{ fontSize: 11, color: "#9ca3af" }}>v0.9</span>
-          </div>
+        {/* Brand */}
+        <div className="hstack" style={{ gap: 10, alignItems: "center" }}>
+          <Link to="/" style={{ ...link(pathname === "/"), fontWeight: 700 }}>Fire Fit</Link>
+          <span style={{ ...badge, display: "none" }}>beta</span>
+        </div>
 
-          {/* Links */}
-          <nav style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <LinkItem to="/">Home</LinkItem>
-            <LinkItem to="/members">Members</LinkItem>
-            <LinkItem to="/standards">Standards</LinkItem>
-            <LinkItem to="/checkoffs">Checkoffs</LinkItem>
-            <LinkItem to="/weekly">Weekly</LinkItem>
-            <LinkItem to="/my">My Profile</LinkItem>
+        {/* Nav links */}
+        <nav style={nav}>
+          {user && (
+            <>
+              <Link to="/" style={link(pathname === "/")}>Home</Link>
+              <Link to="/members" style={link(pathname === "/members")}>Members</Link>
+              <Link to="/standards" style={link(pathname === "/standards")}>Standards</Link>
+              <Link to="/checkoffs" style={link(pathname === "/checkoffs")}>Checkoffs</Link>
+              <Link to="/weekly" style={link(pathname === "/weekly")}>Weekly</Link>
+              <Link to="/leaderboard" style={link(pathname === "/leaderboard")}>Leaderboard</Link>
+              <Link to="/my" style={link(pathname === "/my")}>My Profile</Link>
+            </>
+          )}
+        </nav>
 
-            {/* role badges */}
-            {isOwner && (
-              <span style={{ marginLeft: 8, fontSize: 10, color: "#6ee7b7", letterSpacing: 1 }}>OWNER</span>
-            )}
-            {isMentor && !isOwner && (
-              <span style={{ marginLeft: 8, fontSize: 10, color: "#7dd3fc", letterSpacing: 1 }}>MENTOR</span>
-            )}
-          </nav>
-
-          {/* Auth */}
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            {user ? (
-              <>
-                <span style={{ fontSize: 12, color: "#d1d5db" }}>
+        {/* Auth area */}
+        <div style={right}>
+          {user ? (
+            <>
+              <span className="hstack" style={{ gap: 6 }}>
+                <span style={badge}>{role}</span>
+                <span style={{ color: "#cbd5e1", fontSize: 13 }}>
                   {profile?.displayName || user.email}
                 </span>
-                <button
-                  onClick={async () => { await signOut(); navigate("/login") }}
-                  style={{
-                    padding: "8px 12px",
-                    borderRadius: 8,
-                    fontSize: 14,
-                    fontWeight: 500,
-                    background: "#172136",
-                    color: "#ffffff",
-                    border: "1px solid #1f2937",
-                    cursor: "pointer",
-                  }}
-                >
-                  Logout
-                </button>
-              </>
-            ) : (
-              <NavLink
-                to="/login"
-                style={{
-                  ...linkBase,
-                  background: "#172136",
-                  color: "#ffffff",
-                  border: "1px solid #1f2937",
-                }}
-              >
-                Login
-              </NavLink>
-            )}
-          </div>
+              </span>
+              <button style={btn} onClick={signOut}>Logout</button>
+            </>
+          ) : (
+            <Link to="/login" style={link(pathname === "/login")}>Login</Link>
+          )}
         </div>
       </div>
     </header>
