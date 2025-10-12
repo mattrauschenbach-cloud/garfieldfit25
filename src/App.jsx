@@ -5,13 +5,14 @@ import useAuth from "./lib/auth"
 import NavBar from "./components/NavBar"
 
 // Lazy-load pages
-const Home       = lazy(() => import("./pages/Home"))
-const Members    = lazy(() => import("./pages/Members"))
-const Standards  = lazy(() => import("./pages/Standards"))
-const Checkoffs  = lazy(() => import("./pages/Checkoffs"))
-const Weekly     = lazy(() => import("./pages/Weekly"))
-const MyProfile  = lazy(() => import("./pages/MyProfile"))
-const Login      = lazy(() => import("./pages/Login"))
+const Home                  = lazy(() => import("./pages/Home"))
+const Members               = lazy(() => import("./pages/Members"))
+const Standards             = lazy(() => import("./pages/Standards"))
+const Checkoffs             = lazy(() => import("./pages/Checkoffs"))
+const Weekly                = lazy(() => import("./pages/Weekly"))
+const MyProfile             = lazy(() => import("./pages/MyProfile"))
+const StandardsLeaderboard  = lazy(() => import("./pages/StandardsLeaderboard"))
+const Login                 = lazy(() => import("./pages/Login"))
 
 // Minimal loading UI
 function Loading() {
@@ -67,10 +68,7 @@ export default function App() {
             }
           />
           {/* Optional alias */}
-          <Route
-            path="/home"
-            element={<Navigate to="/" replace />}
-          />
+          <Route path="/home" element={<Navigate to="/" replace />} />
 
           {/* Public */}
           <Route
@@ -82,7 +80,7 @@ export default function App() {
             }
           />
 
-          {/* Signed-in only */}
+          {/* Signed-in only pages */}
           <Route
             path="/members"
             element={
@@ -112,6 +110,14 @@ export default function App() {
             element={
               <RequireAuth>
                 <Weekly />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/leaderboard"
+            element={
+              <RequireAuth>
+                <StandardsLeaderboard />
               </RequireAuth>
             }
           />
