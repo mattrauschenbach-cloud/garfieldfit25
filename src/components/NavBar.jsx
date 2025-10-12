@@ -33,10 +33,9 @@ export default function NavBar() {
             <NavLink to="/standards" className={({isActive}) => `${linkBase} ${isActive ? active : inactive}`}>Standards</NavLink>
             <NavLink to="/checkoffs" className={({isActive}) => `${linkBase} ${isActive ? active : inactive}`}>Checkoffs</NavLink>
             <NavLink to="/weekly" className={({isActive}) => `${linkBase} ${isActive ? active : inactive}`}>Weekly</NavLink>
-            {/* Optional: only show if you kept a profile page */}
             <NavLink to="/my" className={({isActive}) => `${linkBase} ${isActive ? active : inactive}`}>My Profile</NavLink>
 
-            {/* Owner / Admin tools shortcut (optional) */}
+            {/* Role badges (optional) */}
             {isOwner && (
               <span className="ml-2 text-[10px] uppercase tracking-wide text-emerald-300">Owner</span>
             )}
@@ -50,4 +49,29 @@ export default function NavBar() {
             {user ? (
               <>
                 <span className="hidden sm:inline text-xs text-gray-300">
-                  {profile?.displayName || user.e
+                  {profile?.displayName || user.email}
+                </span>
+                <button
+                  onClick={async () => {
+                    await signOut()
+                    navigate("/login")
+                  }}
+                  className="px-3 py-2 rounded-md text-sm font-medium bg-[#172136] text-white border border-[#1f2937] hover:bg-[#0f1a30] transition-colors"
+                >
+                  Logout
+                </button>
+              </>
+            ) : (
+              <NavLink
+                to="/login"
+                className="px-3 py-2 rounded-md text-sm font-medium bg-[#172136] text-white border border-[#1f2937] hover:bg-[#0f1a30] transition-colors"
+              >
+                Login
+              </NavLink>
+            )}
+          </div>
+        </div>
+      </div>
+    </header>
+  )
+}
