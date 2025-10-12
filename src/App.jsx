@@ -4,7 +4,8 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom"
 import useAuth from "./lib/auth"
 import NavBar from "./components/NavBar"
 
-// Lazy-load pages (these files should exist in src/pages/)
+// Lazy-load pages
+const Home       = lazy(() => import("./pages/Home"))
 const Members    = lazy(() => import("./pages/Members"))
 const Standards  = lazy(() => import("./pages/Standards"))
 const Checkoffs  = lazy(() => import("./pages/Checkoffs"))
@@ -15,7 +16,7 @@ const Login      = lazy(() => import("./pages/Login"))
 // Minimal loading UI
 function Loading() {
   return (
-    <div className="container card" style={{marginTop:16}}>
+    <div className="container card" style={{ marginTop: 16 }}>
       <span className="badge">Loading…</span>
     </div>
   )
@@ -33,30 +34,43 @@ function RequireAuth({ children }) {
 function PublicOnly({ children }) {
   const { user, loading } = useAuth()
   if (loading) return <Loading />
-  if (user) return <Navigate to="/members" replace />
+  if (user) return <Navigate to="/" replace />
   return children
 }
 
 // 404 fallback
 function NotFound() {
   return (
-    <div className="container card vstack" style={{marginTop:16}}>
+    <div className="container card vstack" style={{ marginTop: 16 }}>
       <span className="badge">Not Found</span>
-      <p style={{color:"#cbd5e1"}}>The page you’re looking for doesn’t exist.</p>
-      <a className="btn" href="/members">Go to Members</a>
+      <p style={{ color: "#cbd5e1" }}>The page you’re looking for doesn’t exist.</p>
+      <a className="btn" href="/">Go Home</a>
     </div>
   )
 }
 
 export default function App() {
   return (
+    // If your main.jsx already wraps with <BrowserRouter>, remove it here.
     <BrowserRouter>
       <NavBar />
 
       <Suspense fallback={<Loading />}>
         <Routes>
-          {/* Root → members (you can change this to /weekly if you prefer) */}
-          <Route path="/" element={<Navigate to="/members" replace />} />
+          {/* Home (signed-in) */}
+          <Route
+            path="/"
+            element={
+              <RequireAuth>
+                <Home />
+              </RequireAuth>
+            }
+          />
+          {/* Optional alias */}
+          <Route
+            path="/home"
+            element={<Navigate to="/" replace />}
+          />
 
           {/* Public */}
           <Route
