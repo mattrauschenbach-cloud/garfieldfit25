@@ -1,5 +1,5 @@
 // src/pages/Checkoffs.jsx
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import useAuth from "../lib/auth"
 import { db } from "../lib/firebase"
 import {
@@ -9,7 +9,6 @@ import {
 
 const TIERS = ["committed", "developmental", "advanced", "elite"]
 
-// simple progress bar
 function ProgressBar({ value = 0, max = 1, label }) {
   const pct = max > 0 ? Math.round((value / max) * 100) : 0
   return (
@@ -34,18 +33,19 @@ export default function Checkoffs(){
   const { user, profile } = useAuth()
   const isMentor = ["mentor","admin","owner"].includes(profile?.role || "member")
 
-  // member picker (mentors/admin/owner can switch; others see self)
   const [members, setMembers] = useState([])
   const [targetUid, setTargetUid] = useState(null)
 
-  // standards + check states
   const [standards, setStandards] = useState([])
-  const [checks, setChecks] = useState({}) // { standardId: true/false }
+  const [checks, setChecks] = useState({})
   const [tierFilter, setTierFilter] = useState("all")
   const [q, setQ] = useState("")
   const [err, setErr] = useState(null)
 
-  // load members for selector
+  const [usingFallback, setUsingFallback] = useState(false)
+  const unsubRef = useRef(null)
+
+  // Load members for selector (mentors/admins/owner)
   useEffect(() => {
     if (!isMentor) { setMembers([]); setTargetUid(user?.uid || null); return }
     const unsub = onSnapshot(
@@ -60,35 +60,70 @@ export default function Checkoffs(){
     return unsub
   }, [isMentor, user, targetUid])
 
-  // default to me for non-mentors
   useEffect(() => {
     if (!isMentor && user && !targetUid) setTargetUid(user.uid)
   }, [isMentor, user, targetUid])
 
-  // standards list (normalize any old docs that might have "tier " / "category ")
+  // Subscribe to standards with auto-fallback if composite index missing
   useEffect(() => {
-    const unsub = onSnapshot(
-      query(
+    function normalize(docSnap) {
+      const data = docSnap.data() || {}
+      const tier = data.tier ?? data["tier "] ?? "committed"
+      const category = data.category ?? data["category "] ?? null
+      return { id: docSnap.id, ...data, tier, category }
+    }
+
+    function subscribePrimary() {
+      const qy = query(
         collection(db, "standards"),
         orderBy("tier"),
         orderBy("category"),
         orderBy("title")
-      ),
-      snap => {
-        const arr = snap.docs.map(d => {
-          const data = d.data()
-          const tier = data.tier ?? data["tier "] ?? "committed"
-          const category = data.category ?? data["category "] ?? null
-          return { id: d.id, ...data, tier, category }
-        })
-        setStandards(arr)
-      },
-      e => setErr(e)
-    )
-    return unsub
+      )
+      return onSnapshot(
+        qy,
+        snap => {
+          const arr = snap.docs.map(normalize)
+          setStandards(arr)
+          setUsingFallback(false)
+          setErr(null)
+        },
+        e => {
+          const msg = (e?.message || "").toLowerCase()
+          if (msg.includes("requires an index")) {
+            // switch to fallback
+            if (unsubRef.current) unsubRef.current()
+            unsubRef.current = subscribeFallback()
+            setUsingFallback(true)
+            return
+          }
+          setErr(e)
+        }
+      )
+    }
+
+    function subscribeFallback() {
+      const qy = query(collection(db, "standards"), orderBy("tier"))
+      return onSnapshot(
+        qy,
+        snap => {
+          const arr = snap.docs.map(normalize).sort((a,b) =>
+            (a.tier||"").localeCompare(b.tier||"") ||
+            (a.category||"").localeCompare(b.category||"") ||
+            (a.title||"").localeCompare(b.title||"")
+          )
+          setStandards(arr)
+          setErr(null)
+        },
+        e => setErr(e)
+      )
+    }
+
+    unsubRef.current = subscribePrimary()
+    return () => { if (unsubRef.current) unsubRef.current() }
   }, [])
 
-  // checkoffs for selected uid
+  // Checkoffs for selected uid
   useEffect(() => {
     if (!targetUid) return
     const unsub = onSnapshot(
@@ -103,7 +138,7 @@ export default function Checkoffs(){
     return unsub
   }, [targetUid])
 
-  // visible list for the table (respects filters)
+  // Filtered list for UI
   const filtered = useMemo(() => {
     const ql = q.trim().toLowerCase()
     return standards
@@ -115,7 +150,7 @@ export default function Checkoffs(){
       )
   }, [standards, tierFilter, q])
 
-  // progress (uses ALL active standards, not just filtered)
+  // Progress across ALL active standards
   const activeByTier = useMemo(() => {
     const obj = Object.fromEntries(TIERS.map(t => [t, []]))
     standards.forEach(s => {
@@ -164,6 +199,7 @@ export default function Checkoffs(){
           <div className="hstack" style={{gap:8, flexWrap:"wrap"}}>
             <span className="badge">Checkoffs</span>
             <span className="badge">Visible done: <b>{doneCount}</b>/<b>{filtered.length}</b></span>
+            {usingFallback && <span className="badge" title="Using client-side sort because index not available">fallback mode</span>}
           </div>
           <div className="hstack" style={{gap:8, flexWrap:"wrap"}}>
             <input
@@ -207,7 +243,7 @@ export default function Checkoffs(){
         </div>
 
         {!isMentor && (
-          <p style={{color:"#9ca3af", margin:0, fontSize:13, marginTop:6}}>
+          <p style={{color:"#9ca3af", margin:0, fontSize:13}}>
             You’re viewing your own checkoffs.
           </p>
         )}
