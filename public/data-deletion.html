@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Fire Fit — User Data Deletion</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:#0b1426; color:#e5e7eb; margin:0; }
+    .wrap { max-width: 800px; margin: 0 auto; padding: 32px 20px; }
+    h1 { margin: 0 0 12px; }
+    section { background:#0f1a30; border:1px solid #1f2937; border-radius:12px; padding:20px; margin:16px 0; }
+    code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    a { color:#93c5fd; }
+    ol { padding-left: 18px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Fire Fit — User Data Deletion</h1>
+    <p>Fire Fit respects your privacy. This page explains how to request deletion of your account and associated data.</p>
+
+    <section>
+      <h2>What data we hold</h2>
+      <ul>
+        <li>Authentication profile (name, email, sign-in provider)</li>
+        <li>Member profile stored in Firestore (<span class="mono">/profiles/{uid}</span>)</li>
+        <li>Checkoffs and history (<span class="mono">/profiles/{uid}/checkoffs</span>)</li>
+        <li>Weekly challenge logs (<span class="mono">/weeklyChallenges/{weekId}/logs</span> where <span class="mono">uid</span> matches your account)</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>How to request deletion</h2>
+      <p>You can request deletion in either way below:</p>
+      <ol>
+        <li>
+          <strong>Email request (recommended):</strong>
+          Send an email to
+          <a href="mailto:owner@starlit-peony-ea4d6c.netlify.app">owner@starlit-peony-ea4d6c.netlify.app</a>
+          from the same email you used to sign in, with the subject
+          <span class="mono">"Fire Fit — Delete my account"</span>.
+        </li>
+        <li>
+          <strong>In-app request:</strong> If available in your account settings, use the “Delete my account” option.
+          (If you don’t see this option, use the email method above.)
+        </li>
+      </ol>
+      <p>We will delete your data within 30 days of verifying the request.</p>
+    </section>
+
+    <section>
+      <h2>What gets deleted</h2>
+      <ul>
+        <li>Your Firebase Auth user</li>
+        <li>Your profile document and subcollections (checkoffs, history)</li>
+        <li>Your weekly logs</li>
+      </ul>
+      <p><em>Aggregated or anonymized analytics (if any) are not personally identifiable and may be retained.</em></p>
+    </section>
+
+    <section>
+      <h2>Contact</h2>
+      <p>For any questions, contact: <a href="mailto:owner@starlit-peony-ea4d6c.netlify.app">owner@starlit-peony-ea4d6c.netlify.app</a></p>
+    </section>
+  </div>
+</body>
+</html>
