@@ -212,12 +212,13 @@ function StandardsSection(){
   const { user } = useAuth()
   const [standards, setStandards] = useState([])
   const [myCheckoffs, setMyCheckoffs] = useState([])
-  const [history, setHistory] = useState([])
+  const [historyErr, setHistoryErr] = useState(null)
   const [err, setErr] = useState(null)
 
   // Fetch standards (wait for user to avoid rules race & double renders)
   useEffect(() => {
     if (!user) return
+    setErr(null)
     const unsub = onSnapshot(
       collection(db, "standards"),
       snap => setStandards(snap.docs.map(d => ({ id: d.id, ...(d.data()||{}) }))),
@@ -229,6 +230,7 @@ function StandardsSection(){
   // Fetch my checkoffs (wait for user.uid)
   useEffect(() => {
     if (!user?.uid) return
+    setErr(null)
     const unsub = onSnapshot(
       collection(db, "profiles", user.uid, "checkoffs"),
       snap => setMyCheckoffs(snap.docs.map(d => ({ id: d.id, ...(d.data()||{}) }))),
@@ -236,27 +238,6 @@ function StandardsSection(){
     )
     return unsub
   }, [user?.uid])
-
-  // Recent checkoff history (requires signed-in)
-  useEffect(() => {
-    if (!user) return
-    const qy = query(collectionGroup(db, "history"), orderBy("createdAt", "desc"), limit(8))
-    const unsub = onSnapshot(
-      qy,
-      snap => {
-        const arr = snap.docs.map(d => {
-          // path: profiles/{uid}/checkoffs/{standardId}/history/{eventId}
-          const p = d.ref.path.split("/")
-          const uid = p[1]
-          const standardId = p[3]
-          return { id: d.id, uid, standardId, ...(d.data()||{}) }
-        })
-        setHistory(arr)
-      },
-      e => setErr(e)
-    )
-    return unsub
-  }, [user])
 
   // Compute progress by tier + overall
   const tiers = ["committed", "developmental", "advanced", "elite"]
@@ -305,7 +286,9 @@ function StandardsSection(){
         <div className="vstack" style={{gap:6}}>
           <div className="hstack" style={{justifyContent:"space-between", alignItems:"baseline"}}>
             <div style={{fontWeight:700}}>Overall</div>
-            <div style={subtle}>{progress.overall.done}/{progress.overall.total} — {progress.overall.pct}%</div>
+            <div style={subtle}>
+              {progress.overall.done}/{progress.overall.total} — {progress.overall.pct}%
+            </div>
           </div>
           <div style={barWrap}><div style={barFill(progress.overall.pct)} /></div>
         </div>
@@ -316,7 +299,9 @@ function StandardsSection(){
             <div key={r.tier} className="vstack" style={{gap:6}}>
               <div className="hstack" style={{justifyContent:"space-between", alignItems:"baseline"}}>
                 <div style={{textTransform:"capitalize"}}>{r.tier}</div>
-                <div style={subtle}>{r.done}/{r.total} — {r.pct}%</div>
+                <div style={subtle}>
+                  {r.done}/{r.total} — {r.pct}%
+                </div>
               </div>
               <div style={barWrap}><div style={barFill(r.pct)} /></div>
             </div>
@@ -326,54 +311,93 @@ function StandardsSection(){
           )}
         </div>
 
-        {err?.code === "permission-denied" && (
+        {/* Friendly error only if it happens AFTER login */}
+        {!!user && err?.code === "permission-denied" && (
           <div className="card" style={{borderColor:"#7f1d1d", background:"#1f1315", color:"#fecaca"}}>
-            You must be signed in to view checkoff progress. Try refreshing after login.
+            Can’t read checkoff data. If you’re logged in, ask the owner to verify Firestore rules.
           </div>
         )}
       </div>
 
-      {/* Recent Checkoffs (keep) */}
-      <div className="card vstack" style={{gap:8}}>
-        <div className="hstack" style={{justifyContent:"space-between", alignItems:"center"}}>
-          <div className="hstack" style={{gap:8, alignItems:"baseline", flexWrap:"wrap"}}>
-            <span className="badge">Standards</span>
-            <h3 style={{margin:0}}>Recent Checkoffs</h3>
-          </div>
-          <Link className="btn" to="/checkoffs">Open Checkoffs</Link>
+      {/* Recent Checkoffs (kept) */}
+      <RecentCheckoffs userReady={!!user} setParentErr={setHistoryErr} />
+
+      {historyErr && (
+        <div className="card" style={{borderColor:"#7f1d1d", background:"#1f1315", color:"#fecaca"}}>
+          Error: {String(historyErr.message || historyErr)}
         </div>
+      )}
+    </div>
+  )
+}
 
-        {history.length === 0 ? (
-          <div style={{color:"#9ca3af"}}>No recent checkoffs.</div>
-        ) : (
-          <div style={{overflowX:"auto"}}>
-            <table style={table}>
-              <thead>
-                <tr>
-                  <th style={th}>Member</th>
-                  <th style={th}>Standard</th>
-                  <th style={th}>Action</th>
-                  <th style={th}>By</th>
-                  <th style={th}>When</th>
-                  <th style={th}>Note</th>
-                </tr>
-              </thead>
-              <tbody>
-                {history.map(h => (
-                  <tr key={h.id}>
-                    <td style={td}>{h.memberName || h.uid || "—"}</td>
-                    <td style={td}>{h.standardTitle || h.standardId || "—"}</td>
-                    <td style={td}>{h.action || (h.checked ? "checked" : "updated")}</td>
-                    <td style={td}>{h.byName || h.checkedByName || "—"}</td>
-                    <td style={td}>{h.createdAt?.toDate?.()?.toLocaleString?.() || "—"}</td>
-                    <td style={td}>{h.note || h.notes || "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+/* ===========================
+   Helper: Recent Checkoffs feed
+   =========================== */
+function RecentCheckoffs({ userReady, setParentErr }){
+  const [history, setHistory] = useState([])
+
+  useEffect(() => {
+    if (!userReady) return
+    setParentErr?.(null)
+    const qy = query(collectionGroup(db, "history"), orderBy("createdAt", "desc"), limit(8))
+    const unsub = onSnapshot(
+      qy,
+      snap => {
+        const arr = snap.docs.map(d => {
+          // path: profiles/{uid}/checkoffs/{standardId}/history/{eventId}
+          const p = d.ref.path.split("/")
+          const uid = p[1]
+          const standardId = p[3]
+          return { id: d.id, uid, standardId, ...(d.data()||{}) }
+        })
+        setHistory(arr)
+      },
+      e => setParentErr?.(e)
+    )
+    return unsub
+  }, [userReady, setParentErr])
+
+  return (
+    <div className="card vstack" style={{gap:8}}>
+      <div className="hstack" style={{justifyContent:"space-between", alignItems:"center"}}>
+        <div className="hstack" style={{gap:8, alignItems:"baseline", flexWrap:"wrap"}}>
+          <span className="badge">Standards</span>
+          <h3 style={{margin:0}}>Recent Checkoffs</h3>
+        </div>
+        <Link className="btn" to="/checkoffs">Open Checkoffs</Link>
       </div>
+
+      {history.length === 0 ? (
+        <div style={{color:"#9ca3af"}}>No recent checkoffs.</div>
+      ) : (
+        <div style={{overflowX:"auto"}}>
+          <table style={table}>
+            <thead>
+              <tr>
+                <th style={th}>Member</th>
+                <th style={th}>Standard</th>
+                <th style={th}>Action</th>
+                <th style={th}>By</th>
+                <th style={th}>When</th>
+                <th style={th}>Note</th>
+              </tr>
+            </thead>
+            <tbody>
+              {history.map(h => (
+                <tr key={h.id}>
+                  <td style={td}>{h.memberName || h.uid || "—"}</td>
+                  <td style={td}>{h.standardTitle || h.standardId || "—"}</td>
+                  <td style={td}>{h.action || (h.checked ? "checked" : "updated")}</td>
+                  <td style={td}>{h.byName || h.checkedByName || "—"}</td>
+                  <td style={td}>{h.createdAt?.toDate?.()?.toLocaleString?.() || "—"}</td>
+                  <td style={td}>{h.note || h.notes || "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   )
 }
