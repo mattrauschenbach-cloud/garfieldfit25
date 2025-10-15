@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="220" height="60" viewBox="0 0 220 60">
+  <rect width="220" height="60" rx="10" fill="#0b1426"/>
+  <text x="50%" y="50%" fill="#e5e7eb" font-family="system-ui,-apple-system,Segoe UI,Roboto" font-size="20" text-anchor="middle" dominant-baseline="middle">
+    Station 1 Fitness
+  </text>
+</svg>
