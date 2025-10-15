@@ -2,112 +2,133 @@
 import { useEffect, useState } from "react"
 import useAuth from "../lib/auth"
 import { db } from "../lib/firebase"
-import { doc, setDoc } from "firebase/firestore"
+import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore"
 
-const ROLES = ["member", "mentor", "admin", "owner"]
+const label = { fontSize:12, color:"#9ca3af", marginBottom:6 }
+const input = {
+  background:"#0b1426", color:"#e5e7eb", border:"1px solid #1f2937",
+  borderRadius:10, padding:"10px 12px", width:"100%"
+}
+
+const TIER_OPTIONS = ["committed", "developmental", "advanced", "elite"]
 
 export default function MyProfile(){
   const { user, profile } = useAuth()
-  const [displayName, setDisplayName] = useState("")
-  const [role, setRole] = useState("member")
+  const [state, setState] = useState({
+    displayName: "",
+    tier: "committed",
+    photoURL: ""
+  })
+  const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [msg, setMsg] = useState(null)
+  const [err, setErr] = useState(null)
+  const [ok, setOk] = useState(false)
 
   useEffect(() => {
-    setDisplayName(profile?.displayName || user?.displayName || "")
-    setRole(profile?.role || "member")
-  }, [user, profile])
+    let alive = true
+    async function run(){
+      if (!user?.uid) return
+      try {
+        setLoading(true)
+        const ref = doc(db, "profiles", user.uid)
+        const snap = await getDoc(ref)
+        const data = snap.exists() ? snap.data() : {}
+        const next = {
+          displayName: data.displayName || profile?.displayName || user.email || "",
+          tier: (data.tier || "committed").toString(),
+          photoURL: data.photoURL || ""
+        }
+        if (alive) { setState(next); setErr(null) }
+      } catch (e) {
+        if (alive) setErr(e)
+      } finally {
+        if (alive) setLoading(false)
+      }
+    }
+    run()
+    return () => { alive = false }
+  }, [user?.uid, profile?.displayName, user?.email])
 
-  if (!user) return null
-
-  async function saveBasics(e){
-    e.preventDefault()
-    setSaving(true); setMsg(null)
+  async function save(){
+    if (!user?.uid) return
+    setSaving(true); setOk(false); setErr(null)
     try {
-      await setDoc(doc(db, "profiles", user.uid), { displayName: displayName || null }, { merge: true })
-      setMsg({ type:"ok", text:"Saved name." })
+      const ref = doc(db, "profiles", user.uid)
+      await setDoc(ref, {
+        displayName: (state.displayName || "").trim(),
+        tier: state.tier,
+        photoURL: (state.photoURL || "").trim(),
+        updatedAt: serverTimestamp()
+      }, { merge: true })
+      setOk(true)
     } catch (e) {
-      setMsg({ type:"err", text: e.code || e.message })
-    } finally { setSaving(false) }
-  }
-
-  async function saveRole(e){
-    e.preventDefault()
-    setSaving(true); setMsg(null)
-    try {
-      await setDoc(doc(db, "profiles", user.uid), { role }, { merge: true })
-      setMsg({ type:"ok", text:`Saved role: ${role}` })
-    } catch (e) {
-      setMsg({ type:"err", text: e.code || e.message })
-    } finally { setSaving(false) }
+      setErr(e)
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
-    <div className="container vstack">
-      <div className="card vstack">
-        <span className="badge">My Profile</span>
-
-        <div className="hstack" style={{gap:12, flexWrap:"wrap"}}>
-          <div className="vstack" style={{minWidth:280}}>
-            <label className="badge">Display name</label>
-            <form onSubmit={saveBasics} className="hstack" style={{gap:8}}>
-              <input
-                value={displayName}
-                onChange={e=>setDisplayName(e.target.value)}
-                placeholder="Your name"
-                style={{
-                  background:"#0b1426", color:"#e5e7eb",
-                  border:"1px solid #1f2937", borderRadius:10,
-                  padding:"8px 10px", minWidth:220
-                }}
-              />
-              <button className="btn primary" disabled={saving}>Save</button>
-            </form>
-          </div>
-
-          <div className="vstack" style={{minWidth:280}}>
-            <label className="badge">Role</label>
-            <form onSubmit={saveRole} className="hstack" style={{gap:8}}>
-              <select
-                value={role}
-                onChange={e=>setRole(e.target.value)}
-                disabled={saving}
-                style={{
-                  background:"#0b1426", color:"#e5e7eb",
-                  border:"1px solid #1f2937", borderRadius:10,
-                  padding:"8px 10px", minWidth:220
-                }}
-              >
-                {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
-              </select>
-              <button className="btn" disabled={saving}>Save</button>
-            </form>
-            <p style={{color:"#9ca3af", margin:0, fontSize:13}}>
-              Role changes may be restricted by Firestore rules unless you’re owner.
-            </p>
-          </div>
+    <div className="container vstack" style={{gap:12}}>
+      <div className="card vstack" style={{gap:6}}>
+        <div className="hstack" style={{gap:8, alignItems:"baseline", flexWrap:"wrap"}}>
+          <span className="badge">Profile</span>
+          <h2 style={{margin:0}}>My Profile</h2>
         </div>
-
-        <div className="hstack" style={{gap:8, flexWrap:"wrap", marginTop:8}}>
-          <span className="badge">UID: {user.uid}</span>
-          <span className="badge">Email: {user.email || "—"}</span>
-          <span className="badge">Current role: {profile?.role || "member"}</span>
+        <div style={{color:"#9ca3af", fontSize:12}}>
+          Update your display name, photo, and tier. Roles are managed by the owner/admin.
         </div>
-
-        {msg && (
-          <div
-            className="card"
-            style={{
-              marginTop:12,
-              borderColor: msg.type === "ok" ? "#064e3b" : "#7f1d1d",
-              background: msg.type === "ok" ? "#062b24" : "#1f1315",
-              color: msg.type === "ok" ? "#A7F3D0" : "#fecaca"
-            }}
-          >
-            {msg.text}
-          </div>
-        )}
       </div>
+
+      {loading ? (
+        <div className="card">Loading…</div>
+      ) : (
+        <div className="card vstack" style={{gap:12}}>
+          <div className="vstack" style={{gap:6}}>
+            <label style={label}>Display name</label>
+            <input
+              style={input}
+              value={state.displayName}
+              onChange={e => setState(s => ({...s, displayName: e.target.value}))}
+              placeholder="Your name"
+            />
+          </div>
+
+          <div className="vstack" style={{gap:6}}>
+            <label style={label}>Photo URL (optional)</label>
+            <input
+              style={input}
+              value={state.photoURL}
+              onChange={e => setState(s => ({...s, photoURL: e.target.value}))}
+              placeholder="https://…"
+            />
+          </div>
+
+          <div className="vstack" style={{gap:6}}>
+            <label style={label}>Tier</label>
+            <select
+              style={input}
+              value={state.tier}
+              onChange={e => setState(s => ({...s, tier: e.target.value}))}
+            >
+              {TIER_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+
+          <div className="hstack" style={{gap:8, flexWrap:"wrap"}}>
+            <button className="btn" onClick={save} disabled={saving}>
+              {saving ? "Saving…" : "Save changes"}
+            </button>
+            {ok && <span style={{color:"#86efac"}}>Saved!</span>}
+          </div>
+
+          {err && (
+            <div className="card" style={{borderColor:"#7f1d1d", background:"#1f1315", color:"#fecaca"}}>
+              Error: {String(err.message || err)}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
