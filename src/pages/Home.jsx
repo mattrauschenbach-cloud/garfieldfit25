@@ -66,7 +66,7 @@ export default function Home(){
       <WeeklyLeaders />
 
       {/* My Checkoff Progress + Recent Checkoffs */}
-      <StandardsSection />
+      <myCheckoffs />
     </div>
   )
 }
