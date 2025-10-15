@@ -112,7 +112,7 @@ export default function App() {
               }
             />
             <Route
-              path="/me"
+              path="/my"
               element={
                 <ProtectedRoute>
                   <MyProfile />
