@@ -1,0 +1,13 @@
+{
+  "name": "Station 1 Fitness",
+  "short_name": "S1 Fit",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0b1426",
+  "theme_color": "#0b1426",
+  "description": "Standards, weekly challenges, progress tracking.",
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" },
+    { "src": "/logo.svg",    "sizes": "any", "type": "image/svg+xml" }
+  ]
+}
