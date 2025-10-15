@@ -1,5 +1,5 @@
 // src/App.jsx
-import { lazy, Suspense } from "react"
+import { lazy, Suspense, useEffect } from "react"
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom"
 
 import NavBar from "./components/NavBar"
@@ -7,7 +7,7 @@ import EntryGate from "./components/EntryGate"
 import ProtectedRoute from "./components/ProtectedRoute"
 import ErrorBoundary from "./components/ErrorBoundary"
 
-// --- Lazy-loaded pages (code splitting) ---
+// --- Lazy-loaded pages ---
 const Home = lazy(() => import("./pages/Home"))
 const Members = lazy(() => import("./pages/Members"))
 const Standards = lazy(() => import("./pages/Standards"))
@@ -16,9 +16,8 @@ const Weekly = lazy(() => import("./pages/Weekly"))
 const Leaderboard = lazy(() => import("./pages/Leaderboard"))
 const MyProfile = lazy(() => import("./pages/MyProfile"))
 const Login = lazy(() => import("./pages/Login"))
-const Status = lazy(() => import("./pages/Status")) // optional diagnostics
+const Status = lazy(() => import("./pages/Status")) // keep or remove route below if you don't want it
 
-// --- Simple fallback while lazy chunks load ---
 function Loading() {
   return (
     <div className="container vstack" style={{ gap: 10 }}>
@@ -27,16 +26,12 @@ function Loading() {
   )
 }
 
-// --- Scroll to top on route change ---
 function ScrollToTop() {
   const { pathname } = useLocation()
-  // Scroll instantly on path change (no smooth to avoid jank)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  React.useEffect(() => { window.scrollTo(0, 0) }, [pathname])
+  useEffect(() => { window.scrollTo(0, 0) }, [pathname])
   return null
 }
 
-// --- Not Found page ---
 function NotFound() {
   return (
     <div className="container vstack" style={{ gap: 12 }}>
@@ -57,7 +52,7 @@ export default function App() {
       <ScrollToTop />
       <NavBar />
 
-      {/* EntryGate shows on first load / every 24h (owner can edit quote in settings/entryGate) */}
+      {/* EntryGate shows on first load / every 24h */}
       <EntryGate />
 
       <ErrorBoundary>
@@ -67,7 +62,7 @@ export default function App() {
             <Route path="/login" element={<Login />} />
             <Route path="/status" element={<Status />} />
 
-            {/* Private routes (require sign-in) */}
+            {/* Private routes */}
             <Route
               path="/"
               element={
@@ -125,7 +120,7 @@ export default function App() {
               }
             />
 
-            {/* Back-compat redirect examples (optional) */}
+            {/* Back-compat */}
             <Route path="/home" element={<Navigate to="/" replace />} />
 
             {/* Catch-all */}
