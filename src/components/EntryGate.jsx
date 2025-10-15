@@ -5,7 +5,7 @@ import useAuth from "../lib/auth"
 import { doc, onSnapshot, serverTimestamp, setDoc } from "firebase/firestore"
 
 // Rotate these (served from /public)
-const IMAGES = ["/entry1.jpg", "/entry2.jpg", "/entry3.jpg", "/entry4.jpg"]
+const IMAGES = ["/entry2.jpg", "/entry2.jpg", "/entry3.jpg", "/entry4.jpg"]
 const INTERVAL_MS = 4000
 const DEFAULT_QUOTE = "The success you’re looking for waits in the work you’re avoiding."
 
