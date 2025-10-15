@@ -215,57 +215,61 @@ function StandardsSection(){
   const [history, setHistory] = useState([])
   const [err, setErr] = useState(null)
 
-  // Fetch standards (for totals by tier)
+  // Fetch standards (wait for user to avoid rules race & double renders)
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, "standards"), snap => {
-      const arr = snap.docs.map(d => ({ id: d.id, ...(d.data()||{}) }))
-      setStandards(arr)
-    }, e => setErr(e))
+    if (!user) return
+    const unsub = onSnapshot(
+      collection(db, "standards"),
+      snap => setStandards(snap.docs.map(d => ({ id: d.id, ...(d.data()||{}) }))),
+      e => setErr(e)
+    )
     return unsub
-  }, [])
+  }, [user])
 
-  // Fetch my checkoffs
+  // Fetch my checkoffs (wait for user.uid)
   useEffect(() => {
     if (!user?.uid) return
-    const unsub = onSnapshot(collection(db, "profiles", user.uid, "checkoffs"), snap => {
-      const arr = snap.docs.map(d => ({ id: d.id, ...(d.data()||{}) }))
-      setMyCheckoffs(arr)
-    }, e => setErr(e))
+    const unsub = onSnapshot(
+      collection(db, "profiles", user.uid, "checkoffs"),
+      snap => setMyCheckoffs(snap.docs.map(d => ({ id: d.id, ...(d.data()||{}) }))),
+      e => setErr(e)
+    )
     return unsub
   }, [user?.uid])
 
-  // Recent checkoff history (everyone)
+  // Recent checkoff history (requires signed-in)
   useEffect(() => {
+    if (!user) return
     const qy = query(collectionGroup(db, "history"), orderBy("createdAt", "desc"), limit(8))
-    const unsub = onSnapshot(qy, snap => {
-      const arr = snap.docs.map(d => {
-        // path: profiles/{uid}/checkoffs/{standardId}/history/{eventId}
-        const p = d.ref.path.split("/")
-        const uid = p[1]
-        const standardId = p[3]
-        return { id: d.id, uid, standardId, ...(d.data()||{}) }
-      })
-      setHistory(arr)
-    }, e => setErr(e))
+    const unsub = onSnapshot(
+      qy,
+      snap => {
+        const arr = snap.docs.map(d => {
+          // path: profiles/{uid}/checkoffs/{standardId}/history/{eventId}
+          const p = d.ref.path.split("/")
+          const uid = p[1]
+          const standardId = p[3]
+          return { id: d.id, uid, standardId, ...(d.data()||{}) }
+        })
+        setHistory(arr)
+      },
+      e => setErr(e)
+    )
     return unsub
-  }, [])
+  }, [user])
 
   // Compute progress by tier + overall
   const tiers = ["committed", "developmental", "advanced", "elite"]
   const progress = useMemo(() => {
     const byTierTotal = Object.fromEntries(tiers.map(t => [t, 0]))
     const byTierChecked = Object.fromEntries(tiers.map(t => [t, 0]))
-
-    // normalize helper
     const norm = (s) => (s || "").toString().trim().toLowerCase()
 
     for (const s of standards) {
       const t = norm(s.tier)
       if (byTierTotal[t] != null) byTierTotal[t]++
     }
-    const checkedSet = new Set(
-      myCheckoffs.filter(c => c.checked).map(c => c.id) // ids are standardId
-    )
+    const checkedSet = new Set(myCheckoffs.filter(c => c.checked).map(c => c.id))
     for (const s of standards) {
       const t = norm(s.tier)
       if (byTierChecked[t] != null && checkedSet.has(s.id)) byTierChecked[t]++
@@ -322,9 +326,9 @@ function StandardsSection(){
           )}
         </div>
 
-        {err && (
+        {err?.code === "permission-denied" && (
           <div className="card" style={{borderColor:"#7f1d1d", background:"#1f1315", color:"#fecaca"}}>
-            Error: {String(err.message || err)}
+            You must be signed in to view checkoff progress. Try refreshing after login.
           </div>
         )}
       </div>
