@@ -1,139 +1,138 @@
 // src/App.jsx
-import { Suspense, lazy } from "react"
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom"
-import useAuth from "./lib/auth"
+import { lazy, Suspense } from "react"
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom"
+
 import NavBar from "./components/NavBar"
+import EntryGate from "./components/EntryGate"
+import ProtectedRoute from "./components/ProtectedRoute"
+import ErrorBoundary from "./components/ErrorBoundary"
 
-// Lazy-load pages
-const Home                  = lazy(() => import("./pages/Home"))
-const Members               = lazy(() => import("./pages/Members"))
-const Standards             = lazy(() => import("./pages/Standards"))
-const Checkoffs             = lazy(() => import("./pages/Checkoffs"))
-const Weekly                = lazy(() => import("./pages/Weekly"))
-const MyProfile             = lazy(() => import("./pages/MyProfile"))
-const StandardsLeaderboard  = lazy(() => import("./pages/StandardsLeaderboard"))
-const Login                 = lazy(() => import("./pages/Login"))
+// --- Lazy-loaded pages (code splitting) ---
+const Home = lazy(() => import("./pages/Home"))
+const Members = lazy(() => import("./pages/Members"))
+const Standards = lazy(() => import("./pages/Standards"))
+const Checkoffs = lazy(() => import("./pages/Checkoffs"))
+const Weekly = lazy(() => import("./pages/Weekly"))
+const Leaderboard = lazy(() => import("./pages/Leaderboard"))
+const MyProfile = lazy(() => import("./pages/MyProfile"))
+const Login = lazy(() => import("./pages/Login"))
+const Status = lazy(() => import("./pages/Status")) // optional diagnostics
 
-// Minimal loading UI
+// --- Simple fallback while lazy chunks load ---
 function Loading() {
   return (
-    <div className="container card" style={{ marginTop: 16 }}>
-      <span className="badge">Loading…</span>
+    <div className="container vstack" style={{ gap: 10 }}>
+      <div className="card" style={{ color: "#cbd5e1" }}>Loading…</div>
     </div>
   )
 }
 
-// Require the user to be signed in
-function RequireAuth({ children }) {
-  const { user, loading } = useAuth()
-  if (loading) return <Loading />
-  if (!user) return <Navigate to="/login" replace />
-  return children
+// --- Scroll to top on route change ---
+function ScrollToTop() {
+  const { pathname } = useLocation()
+  // Scroll instantly on path change (no smooth to avoid jank)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  React.useEffect(() => { window.scrollTo(0, 0) }, [pathname])
+  return null
 }
 
-// Redirect to app if already signed in (for /login)
-function PublicOnly({ children }) {
-  const { user, loading } = useAuth()
-  if (loading) return <Loading />
-  if (user) return <Navigate to="/" replace />
-  return children
-}
-
-// 404 fallback
+// --- Not Found page ---
 function NotFound() {
   return (
-    <div className="container card vstack" style={{ marginTop: 16 }}>
-      <span className="badge">Not Found</span>
-      <p style={{ color: "#cbd5e1" }}>The page you’re looking for doesn’t exist.</p>
-      <a className="btn" href="/">Go Home</a>
+    <div className="container vstack" style={{ gap: 12 }}>
+      <div className="card vstack" style={{ gap: 6 }}>
+        <span className="badge">404</span>
+        <h2 style={{ margin: 0 }}>Page not found</h2>
+        <p style={{ color: "#9ca3af" }}>
+          The page you’re looking for doesn’t exist. Head back to <a className="link" href="/">Home</a>.
+        </p>
+      </div>
     </div>
   )
 }
 
 export default function App() {
   return (
-    // If your main.jsx already wraps with <BrowserRouter>, remove it here.
     <BrowserRouter>
+      <ScrollToTop />
       <NavBar />
 
-      <Suspense fallback={<Loading />}>
-        <Routes>
-          {/* Home (signed-in) */}
-          <Route
-            path="/"
-            element={
-              <RequireAuth>
-                <Home />
-              </RequireAuth>
-            }
-          />
-          {/* Optional alias */}
-          <Route path="/home" element={<Navigate to="/" replace />} />
+      {/* EntryGate shows on first load / every 24h (owner can edit quote in settings/entryGate) */}
+      <EntryGate />
 
-          {/* Public */}
-          <Route
-            path="/login"
-            element={
-              <PublicOnly>
-                <Login />
-              </PublicOnly>
-            }
-          />
+      <ErrorBoundary>
+        <Suspense fallback={<Loading />}>
+          <Routes>
+            {/* Public routes */}
+            <Route path="/login" element={<Login />} />
+            <Route path="/status" element={<Status />} />
 
-          {/* Signed-in only pages */}
-          <Route
-            path="/members"
-            element={
-              <RequireAuth>
-                <Members />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/standards"
-            element={
-              <RequireAuth>
-                <Standards />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/checkoffs"
-            element={
-              <RequireAuth>
-                <Checkoffs />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/weekly"
-            element={
-              <RequireAuth>
-                <Weekly />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/leaderboard"
-            element={
-              <RequireAuth>
-                <StandardsLeaderboard />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/my"
-            element={
-              <RequireAuth>
-                <MyProfile />
-              </RequireAuth>
-            }
-          />
+            {/* Private routes (require sign-in) */}
+            <Route
+              path="/"
+              element={
+                <ProtectedRoute>
+                  <Home />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/members"
+              element={
+                <ProtectedRoute>
+                  <Members />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/standards"
+              element={
+                <ProtectedRoute>
+                  <Standards />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/checkoffs"
+              element={
+                <ProtectedRoute>
+                  <Checkoffs />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/weekly"
+              element={
+                <ProtectedRoute>
+                  <Weekly />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/leaderboard"
+              element={
+                <ProtectedRoute>
+                  <Leaderboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/me"
+              element={
+                <ProtectedRoute>
+                  <MyProfile />
+                </ProtectedRoute>
+              }
+            />
 
-          {/* 404 */}
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </Suspense>
+            {/* Back-compat redirect examples (optional) */}
+            <Route path="/home" element={<Navigate to="/" replace />} />
+
+            {/* Catch-all */}
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </Suspense>
+      </ErrorBoundary>
     </BrowserRouter>
   )
 }
