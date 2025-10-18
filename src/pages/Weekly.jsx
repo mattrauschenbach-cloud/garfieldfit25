@@ -3,435 +3,442 @@ import { useEffect, useMemo, useState } from "react"
 import useAuth from "../lib/auth"
 import { db } from "../lib/firebase"
 import {
-  addDoc,
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  limit,
-  onSnapshot,
-  orderBy,
-  query,
-  serverTimestamp,
-  setDoc,
-  updateDoc,
+  addDoc, collection, deleteDoc, doc, limit, onSnapshot, orderBy, query,
+  serverTimestamp, setDoc, updateDoc
 } from "firebase/firestore"
 
-const subtle = { color:"#9ca3af", fontSize:12 }
-const input = {
-  background:"#0b1426", color:"#e5e7eb", border:"1px solid #1f2937",
-  borderRadius:10, padding:"10px 12px"
+const inputStyle = { background:"#0b1426", color:"#e5e7eb", border:"1px solid #1f2937", borderRadius:8, padding:"8px 10px" }
+const areaStyle  = { ...inputStyle, minHeight:90 }
+const th = { textAlign:"left", padding:"10px 12px", fontSize:12, color:"#9ca3af" }
+const td = { padding:"10px 12px" }
+const units = ["reps","minutes","miles","meters","rounds","seconds","kg","lb"]
+
+function isoDate(d = new Date()) {
+  const tz = new Date(d)
+  const yyyy = tz.getFullYear()
+  const mm = String(tz.getMonth()+1).padStart(2,"0")
+  const dd = String(tz.getDate()).padStart(2,"0")
+  return `${yyyy}-${mm}-${dd}`
 }
-const table = { width:"100%", borderCollapse:"collapse" }
-const th = { textAlign:"left", padding:"10px 12px", fontSize:12, color:"#9ca3af",
-  borderBottom:"1px solid #1f2937", background:"#0f1a30" }
-const td = { padding:"10px 12px", borderBottom:"1px solid #1f2937" }
 
 export default function Weekly(){
-  const { user, profile, isOwner, isAdmin } = useAuth()
-  const canManageWeek = isOwner || isAdmin
+  const { user, profile } = useAuth()
+  const role = profile?.role || "member"
+  const isOwner = role === "owner"
+  const isMentor = ["mentor","admin","owner"].includes(role)
 
-  const [weeks, setWeeks] = useState([])
-  const [current, setCurrent] = useState(null)
-  const [logs, setLogs] = useState([])
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState(null)
+  // current week doc
+  const [week, setWeek] = useState(null)     // { id, title, description, startDate, endDate, active, scoreMode, unit? }
+  const [err, setErr]   = useState(null)
+  const [busy, setBusy] = useState(null)
 
-  // Form for adding a log
-  const [val, setVal] = useState("")
-  const [note, setNote] = useState("")
-
-  // Manage form (create/edit week)
+  // owner edit buffers
   const [wTitle, setWTitle] = useState("")
-  const [wUnit, setWUnit] = useState("")
+  const [wDesc, setWDesc]   = useState("")
+  const [wStart, setWStart] = useState(isoDate())
+  const [wEnd, setWEnd]     = useState("")
+  const [wMode, setWMode]   = useState("higher_is_better") // or "lower_is_better"
+  const [wUnit, setWUnit]   = useState(units[0])           // default unit for this week
 
-  // Fetch recent weeks (newest first), then pick current and archived.
+  // logs for the current week
+  const [logs, setLogs] = useState([]) // [{id, uid, displayName, value, unit, notes, createdAt, updatedAt}]
+  // my new log editor
+  const [myValue, setMyValue] = useState("")
+  const [myUnit, setMyUnit]   = useState(units[0])
+  const [myNotes, setMyNotes] = useState("")
+
+  // ---- Subscribe to latest week (by startDate desc)
   useEffect(() => {
-    setErr(null)
-    const qy = query(collection(db, "weeklyChallenges"), orderBy("startDate", "desc"), limit(25))
-    const unsub = onSnapshot(qy, snap => {
-      const arr = snap.docs.map(d => ({ id: d.id, ...(d.data()||{}) }))
-      setWeeks(arr)
+    const q = query(collection(db, "weeklyChallenges"), orderBy("startDate", "desc"), limit(1))
+    const unsub = onSnapshot(q, snap => {
+      const d = snap.docs[0]
+      if (!d) { setWeek(null); return }
+      const data = d.data()
+      const row = {
+        id: d.id,
+        title: data.title || "Weekly Challenge",
+        description: data.description || "",
+        startDate: data.startDate || isoDate(),
+        endDate: data.endDate || "",
+        active: data.active !== false,
+        scoreMode: data.scoreMode === "lower_is_better" ? "lower_is_better" : "higher_is_better",
+        unit: data.unit || data.defaultUnit || units[0],
+      }
+      setWeek(row)
+      // seed owner buffers
+      setWTitle(row.title)
+      setWDesc(row.description)
+      setWStart(row.startDate)
+      setWEnd(row.endDate)
+      setWMode(row.scoreMode)
+      setWUnit(row.unit)
+      // seed my entry unit to week's unit
+      setMyUnit(row.unit)
     }, e => setErr(e))
     return unsub
   }, [])
 
-  // Determine current week and subscribe to its logs
+  // ---- Subscribe to all logs for current week
   useEffect(() => {
-    if (!weeks.length) { setCurrent(null); setLogs([]); return }
-    const active = weeks.find(w => w.active !== false) || weeks[0]
-    setCurrent(active)
-
-    // seed edit fields with current values
-    if (active) {
-      setWTitle(active.title || "")
-      setWUnit(active.unit || "")
-    }
-
-    if (!active?.id) { setLogs([]); return }
-    const ref = collection(db, "weeklyChallenges", active.id, "logs")
-    const unsub = onSnapshot(ref, snap => {
-      setLogs(snap.docs.map(d => ({ id: d.id, ...(d.data()||{}) })))
+    if (!week?.id) { setLogs([]); return }
+    const q = query(
+      collection(db, "weeklyChallenges", week.id, "logs"),
+      orderBy("updatedAt","desc")
+    )
+    const unsub = onSnapshot(q, snap => {
+      const arr = snap.docs.map(d => ({ id: d.id, ...(d.data()) }))
+      setLogs(arr)
     }, e => setErr(e))
     return unsub
-  }, [weeks])
+  }, [week?.id])
 
-  // Aggregate leaderboard + totals (client-side)
-  const agg = useMemo(() => {
-    const byUser = new Map()
-    let teamTotal = 0
+  // ---- Aggregations
+  // totals per uid
+  const totals = useMemo(() => {
+    const map = new Map()
     for (const l of logs) {
-      const uid = l.uid || "unknown"
-      const name = l.displayName || uid
-      const v = Number(l.value) || 0
-      teamTotal += v
-      const cur = byUser.get(uid) || { uid, name, total: 0 }
-      cur.total += v
-      byUser.set(uid, cur)
+      const v = Number(l.value)
+      if (!Number.isFinite(v)) continue
+      const prev = map.get(l.uid) || 0
+      map.set(l.uid, prev + v)
     }
-    const leaderboard = [...byUser.values()].sort((a,b)=> b.total - a.total)
-    const leader = leaderboard[0] || null
-    return { teamTotal, leader, leaderboard }
+    return map // Map<uid, total>
   }, [logs])
 
-  async function addLog(){
-    if (!user?.uid || !current?.id) return
-    const v = Number(val)
-    if (!Number.isFinite(v) || v <= 0) { alert("Enter a positive number"); return }
-    setBusy(true)
-    try {
-      await addDoc(collection(db, "weeklyChallenges", current.id, "logs"), {
+  // leaderboard sorted by weekly score mode
+  const leaderboard = useMemo(() => {
+    // reduce to one row per uid with summed total
+    const byUid = new Map()
+    for (const l of logs) {
+      const uid = l.uid
+      const v = Number(l.value)
+      if (!Number.isFinite(v)) continue
+      const prev = byUid.get(uid) || { uid, displayName: l.displayName || uid, total: 0, unit: l.unit || week?.unit }
+      prev.total += v
+      byUid.set(uid, prev)
+    }
+    const arr = Array.from(byUid.values())
+    arr.sort((a,b) => {
+      if (week?.scoreMode === "lower_is_better") return a.total - b.total
+      return b.total - a.total
+    })
+    return arr
+  }, [logs, week?.scoreMode, week?.unit])
+
+  const globalTotal = useMemo(() => {
+    return leaderboard.reduce((a, r) => a + (Number(r.total) || 0), 0)
+  }, [leaderboard])
+
+  const myRank = useMemo(() => {
+    if (!user) return null
+    const idx = leaderboard.findIndex(e => e.uid === user.uid)
+    return idx === -1 ? null : (idx + 1)
+  }, [leaderboard, user?.uid])
+
+  // ---- Owner actions
+  async function createNewWeek(){
+    if (!isOwner) return
+    try{
+      setBusy("create")
+      if (week?.id && week.active) {
+        await updateDoc(doc(db, "weeklyChallenges", week.id), { active:false, updatedAt: serverTimestamp() })
+      }
+      const id = wStart || isoDate()
+      await setDoc(doc(db, "weeklyChallenges", id), {
+        title: (wTitle || "Weekly Challenge").trim(),
+        description: (wDesc || "").trim(),
+        startDate: wStart || isoDate(),
+        endDate: wEnd || "",
+        scoreMode: wMode === "lower_is_better" ? "lower_is_better" : "higher_is_better",
+        unit: wUnit || units[0],
+        active: true,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }, { merge: true })
+      alert("New weekly challenge created & set active.")
+    }catch(e){
+      alert(`Create failed: ${e.code || e.message}`)
+    }finally{
+      setBusy(null)
+    }
+  }
+
+  async function saveWeek(){
+    if (!isOwner || !week?.id) return
+    try{
+      setBusy("save")
+      await updateDoc(doc(db, "weeklyChallenges", week.id), {
+        title: (wTitle || "Weekly Challenge").trim(),
+        description: (wDesc || "").trim(),
+        startDate: wStart || isoDate(),
+        endDate: wEnd || "",
+        scoreMode: wMode === "lower_is_better" ? "lower_is_better" : "higher_is_better",
+        unit: wUnit || units[0],
+        updatedAt: serverTimestamp(),
+      })
+      alert("Saved.")
+    }catch(e){
+      alert(`Save failed: ${e.code || e.message}`)
+    }finally{
+      setBusy(null)
+    }
+  }
+
+  async function setActive(next){
+    if (!isOwner || !week?.id) return
+    try{
+      setBusy("active")
+      await updateDoc(doc(db, "weeklyChallenges", week.id), { active: !!next, updatedAt: serverTimestamp() })
+    }catch(e){
+      alert(`Update failed: ${e.code || e.message}`)
+    }finally{
+      setBusy(null)
+    }
+  }
+
+  // ---- Member logging
+  function parseValue(v) {
+    if (v === "" || v == null) return null
+    const n = Number(v)
+    return Number.isFinite(n) ? n : null
+  }
+
+  async function addMyLog(e){
+    e?.preventDefault?.()
+    if (!user || !week?.id) return
+    const val = parseValue(myValue)
+    if (val === null) { alert("Enter a numeric value."); return }
+    try{
+      setBusy("addlog")
+      await addDoc(collection(db, "weeklyChallenges", week.id, "logs"), {
         uid: user.uid,
         displayName: profile?.displayName || user.email || "Member",
-        value: v,
-        note: (note || "").trim(),
+        value: val,
+        unit: myUnit || week?.unit || units[0],
+        notes: myNotes || "",
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       })
-      setVal("")
-      setNote("")
-    } catch (e) {
-      alert(e.message || String(e))
-    } finally {
-      setBusy(false)
+      // clear just the value/notes for quick repeat logging
+      setMyValue("")
+      setMyNotes("")
+    }catch(e){
+      alert(`Add failed: ${e.code || e.message}`)
+    }finally{
+      setBusy(null)
     }
   }
 
-  // Owner/Admin: Archive current week — compute totals and write to doc
-  async function archiveWeek(){
-    if (!canManageWeek || !current?.id) return
-    if (!confirm("Archive this week? This will mark it inactive and store team total & leader.")) return
-    setBusy(true)
-    try {
-      // Read all logs once to compute final stats (don’t rely on state)
-      const lsnap = await getDocs(collection(db, "weeklyChallenges", current.id, "logs"))
-      let team = 0
-      const byUser = new Map()
-      lsnap.forEach(d => {
-        const data = d.data() || {}
-        const uid = data.uid || "unknown"
-        const name = data.displayName || uid
-        const v = Number(data.value) || 0
-        team += v
-        const cur = byUser.get(uid) || { uid, name, total: 0 }
-        cur.total += v
-        byUser.set(uid, cur)
-      })
-      const leaderboard = [...byUser.values()].sort((a,b)=> b.total - a.total)
-      const leader = leaderboard[0] || null
-
-      await updateDoc(doc(db, "weeklyChallenges", current.id), {
-        active: false,
-        teamTotal: team,
-        leaderUid: leader?.uid || null,
-        leaderName: leader?.name || null,
-        leaderTotal: leader?.total || 0,
-        archivedAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      })
-      alert("Week archived.")
-    } catch (e) {
-      alert(e.message || String(e))
-    } finally {
-      setBusy(false)
+  async function removeLog(logId, uid){
+    if (!week?.id) return
+    if (!(isOwner || isMentor || (user && user.uid === uid))) return
+    try{
+      setBusy(`del-${logId}`)
+      await deleteDoc(doc(db, "weeklyChallenges", week.id, "logs", logId))
+    }catch(e){
+      alert(`Delete failed: ${e.code || e.message}`)
+    }finally{
+      setBusy(null)
     }
   }
 
-  // Owner/Admin: Create a brand-new active week
-  async function createWeek(){
-    if (!canManageWeek) return
-    const title = (wTitle || "").trim()
-    const unit = (wUnit || "").trim()
-    if (!title) { alert("Please enter a week title first."); return }
-    setBusy(true)
-    try {
-      // Deactivate any current active week (best effort — optional)
-      const currId = current?.id
-      if (currId && current?.active !== false) {
-        await updateDoc(doc(db, "weeklyChallenges", currId), { active: false, updatedAt: serverTimestamp() })
-      }
-      // Create new current week
-      await setDoc(doc(collection(db, "weeklyChallenges")), {
-        title,
-        unit,
-        startDate: new Date().toISOString(),
-        active: true,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      })
-      setWTitle("")
-      setWUnit("")
-      alert("New week created.")
-    } catch (e) {
-      alert(e.message || String(e))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  // Owner/Admin: Save edits to the current week (title/unit)
-  async function saveWeekDetails(){
-    if (!canManageWeek || !current?.id) return
-    const title = (wTitle || "").trim()
-    const unit = (wUnit || "").trim()
-    if (!title) { alert("Title is required."); return }
-    setBusy(true)
-    try {
-      await updateDoc(doc(db, "weeklyChallenges", current.id), {
-        title,
-        unit,
-        updatedAt: serverTimestamp(),
-      })
-      alert("Week details saved.")
-    } catch (e) {
-      alert(e.message || String(e))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  // Owner/Admin: Re-open an archived week (optional)
-  async function reopenWeek(){
-    if (!canManageWeek || !current?.id) return
-    if (!confirm("Re-open this archived week as active?")) return
-    setBusy(true)
-    try {
-      await updateDoc(doc(db, "weeklyChallenges", current.id), {
-        active: true,
-        updatedAt: serverTimestamp(),
-      })
-      alert("Week re-opened.")
-    } catch (e) {
-      alert(e.message || String(e))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const archived = useMemo(
-    () => weeks.filter(w => w.active === false),
-    [weeks]
-  )
+  const activeBadge = week ? (
+    <span className="badge" style={{marginLeft:8}}>{week.active ? "active" : "inactive"}</span>
+  ) : null
 
   return (
-    <div className="container vstack" style={{gap:12}}>
-      <div className="card vstack" style={{gap:6}}>
-        <div className="hstack" style={{gap:8, alignItems:"baseline", flexWrap:"wrap"}}>
-          <span className="badge">Weekly</span>
-          <h2 style={{margin:0}}>Weekly Challenge</h2>
-        </div>
-        <div style={subtle}>
-          Create and edit the current weekly challenge; members log efforts. Archiving stores team total and leader.
-        </div>
-      </div>
-
-      {err && (
-        <div className="card" style={{borderColor:"#7f1d1d", background:"#1f1315", color:"#fecaca"}}>
-          Error: {String(err.message || err)}
-        </div>
-      )}
-
-      {/* Manage Week (Owner/Admin) */}
-      <div className="card vstack" style={{gap:10}}>
-        <div className="hstack" style={{justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:10}}>
-          <div className="hstack" style={{gap:8, alignItems:"baseline", flexWrap:"wrap"}}>
-            <span className="badge">Manage</span>
-            <h3 style={{margin:0}}>Current Week Settings</h3>
+    <div className="container vstack">
+      {/* Header */}
+      <div className="card vstack">
+        <div className="hstack" style={{justifyContent:"space-between", gap:12, flexWrap:"wrap"}}>
+          <div className="hstack" style={{gap:8, flexWrap:"wrap"}}>
+            <span className="badge">Weekly</span>
+            {week?.id && <span className="badge">Week ID: {week.id}</span>}
+            {activeBadge}
+            {week && <span className="badge">Mode: {week.scoreMode === "lower_is_better" ? "Lower is better" : "Higher is better"}</span>}
+            {week && <span className="badge">Unit: {week.unit}</span>}
+            <span className="badge">Total this week: {globalTotal} {week?.unit || ""}</span>
           </div>
-          {canManageWeek && current && (
+
+          {isOwner && (
             <div className="hstack" style={{gap:8, flexWrap:"wrap"}}>
-              {current.active === false ? (
-                <button className="btn" onClick={reopenWeek} disabled={busy}>Re-open</button>
-              ) : (
-                <button className="btn" onClick={archiveWeek} disabled={busy}>
-                  {busy ? "Working…" : "Archive week"}
-                </button>
-              )}
+              <button className="btn" disabled={busy==="active" || !week} onClick={()=>setActive(!(week?.active))}>
+                {busy==="active" ? "Saving…" : (week?.active ? "Set Inactive" : "Set Active")}
+              </button>
+              <button className="btn primary" disabled={busy==="create"} onClick={createNewWeek}>
+                {busy==="create" ? "Creating…" : "Create New Week"}
+              </button>
             </div>
           )}
         </div>
 
-        {canManageWeek ? (
-          <>
+        {/* Owner editor */}
+        {isOwner ? (
+          <div className="vstack" style={{gap:8, marginTop:10}}>
+            <label className="vstack">
+              <span style={{color:"#9ca3af", fontSize:12}}>Title</span>
+              <input value={wTitle} onChange={e=>setWTitle(e.target.value)} style={inputStyle} placeholder="e.g., Total Miles This Week"/>
+            </label>
+            <label className="vstack">
+              <span style={{color:"#9ca3af", fontSize:12}}>Description</span>
+              <textarea value={wDesc} onChange={e=>setWDesc(e.target.value)} style={areaStyle} placeholder="Explain the challenge, standards, tips…"/>
+            </label>
             <div className="hstack" style={{gap:8, flexWrap:"wrap"}}>
-              <input
-                style={{...input, flex:1, minWidth:220}}
-                value={wTitle}
-                onChange={e=>setWTitle(e.target.value)}
-                placeholder="Week title (e.g., Week of Oct 20)"
-              />
-              <input
-                style={{...input, minWidth:160}}
-                value={wUnit}
-                onChange={e=>setWUnit(e.target.value)}
-                placeholder="Unit (miles, pushups, minutes...)"
-              />
+              <label className="vstack">
+                <span style={{color:"#9ca3af", fontSize:12}}>Start date</span>
+                <input type="date" value={wStart} onChange={e=>setWStart(e.target.value)} style={inputStyle}/>
+              </label>
+              <label className="vstack">
+                <span style={{color:"#9ca3af", fontSize:12}}>End date (optional)</span>
+                <input type="date" value={wEnd} onChange={e=>setWEnd(e.target.value)} style={inputStyle}/>
+              </label>
+              <label className="vstack">
+                <span style={{color:"#9ca3af", fontSize:12}}>Score mode</span>
+                <select value={wMode} onChange={e=>setWMode(e.target.value)} style={inputStyle}>
+                  <option value="higher_is_better">Higher is better</option>
+                  <option value="lower_is_better">Lower is better</option>
+                </select>
+              </label>
+              <label className="vstack">
+                <span style={{color:"#9ca3af", fontSize:12}}>Unit for this week</span>
+                <select value={wUnit} onChange={e=>setWUnit(e.target.value)} style={inputStyle}>
+                  {units.map(u => <option key={u} value={u}>{u}</option>)}
+                </select>
+              </label>
             </div>
-            <div className="hstack" style={{gap:8, flexWrap:"wrap"}}>
-              {current ? (
-                <>
-                  <button className="btn" onClick={saveWeekDetails} disabled={busy}>
-                    Save week details
-                  </button>
-                  <button className="btn" onClick={createWeek} disabled={busy}>
-                    New week
-                  </button>
-                </>
-              ) : (
-                <button className="btn" onClick={createWeek} disabled={busy}>
-                  Create current week
-                </button>
-              )}
-            </div>
-          </>
-        ) : (
-          <div style={{color:"#9ca3af"}}>Only owner/admin can manage week settings.</div>
-        )}
-      </div>
-
-      {/* Current Week view */}
-      <div className="card vstack" style={{gap:10}}>
-        <div className="hstack" style={{justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:10}}>
-          <div className="vstack" style={{gap:2}}>
-            <div className="hstack" style={{gap:8, alignItems:"baseline", flexWrap:"wrap"}}>
-              <span className="badge">Current</span>
-              <h3 style={{margin:0}}>{current?.title || "No current week"}</h3>
-              {current?.unit && <span style={subtle}>Unit: {current.unit}</span>}
-              {current && current.active === false && <span className="badge">archived</span>}
+            <div className="hstack" style={{gap:8}}>
+              <button className="btn primary" onClick={saveWeek} disabled={busy==="save" || !week?.id}>
+                {busy==="save" ? "Saving…" : "Save Week"}
+              </button>
             </div>
           </div>
-        </div>
-
-        {!current ? (
-          <div style={{color:"#9ca3af"}}>No weeks yet. {canManageWeek && "Create one to get started."}</div>
-        ) : current.active === false ? (
-          <div style={{color:"#9ca3af"}}>
-            This week is archived. Team total: <b>{current.teamTotal ?? 0}</b>{current.unit ? ` ${current.unit}` : ""}.
-            {current.leaderName ? <> Leader: <b>{current.leaderName}</b> ({current.leaderTotal ?? 0}{current.unit ? ` ${current.unit}` : ""}).</> : null}
-          </div>
         ) : (
-          <>
-            {/* Big stats */}
-            <div className="hstack" style={{gap:12, flexWrap:"wrap"}}>
-              <Stat label="Team total">
-                <b>{agg.teamTotal}</b>{current.unit ? ` ${current.unit}` : ""}
-              </Stat>
-              <Stat label="Leader">
-                {agg.leader
-                  ? <><b>{agg.leader.name}</b> — <b>{agg.leader.total}</b>{current.unit ? ` ${current.unit}` : ""}</>
-                  : "—"}
-              </Stat>
-            </div>
-
-            {/* Log form */}
-            <div className="vstack" style={{gap:8}}>
-              <div style={subtle}>Add to your total</div>
-              <div className="hstack" style={{gap:8, flexWrap:"wrap"}}>
-                <input
-                  style={input}
-                  type="number"
-                  min="0"
-                  step="any"
-                  value={val}
-                  onChange={e=>setVal(e.target.value)}
-                  placeholder={`Amount (${current.unit || "units"})`}
-                />
-                <input
-                  style={{...input, minWidth:240, flex:1}}
-                  value={note}
-                  onChange={e=>setNote(e.target.value)}
-                  placeholder="Note (optional)"
-                />
-                <button className="btn" onClick={addLog} disabled={busy}>Add log</button>
-              </div>
-            </div>
-
-            {/* Leaderboard (live from logs) */}
-            <div className="vstack" style={{gap:8}}>
-              <div className="hstack" style={{gap:8, alignItems:"baseline"}}>
-                <span className="badge">Live</span>
-                <h3 style={{margin:0}}>Leaderboard</h3>
-              </div>
-              {agg.leaderboard.length === 0 ? (
-                <div style={{color:"#9ca3af"}}>No logs yet.</div>
-              ) : (
-                <div style={{overflowX:"auto"}}>
-                  <table style={table}>
-                    <thead>
-                      <tr>
-                        <th style={th}>#</th>
-                        <th style={th}>Member</th>
-                        <th style={th}>Total</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {agg.leaderboard.map((r, i) => (
-                        <tr key={r.uid}>
-                          <td style={td}><b>{i+1}</b></td>
-                          <td style={td}>{r.name}</td>
-                          <td style={td}><b>{r.total}</b>{current.unit ? ` ${current.unit}` : ""}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+          <div className="vstack" style={{gap:6, marginTop:6}}>
+            {week ? (
+              <>
+                <h3 style={{margin:"4px 0"}}>{week.title}</h3>
+                {week.description && <p style={{marginTop:0, color:"#cbd5e1"}}>{week.description}</p>}
+                <div className="hstack" style={{gap:8, color:"#9ca3af", fontSize:13}}>
+                  {week.startDate && <span>Start: {week.startDate}</span>}
+                  {week.endDate && <span>End: {week.endDate}</span>}
                 </div>
-              )}
-            </div>
-          </>
+              </>
+            ) : (
+              <p style={{color:"#9ca3af"}}>No weekly challenge yet.</p>
+            )}
+          </div>
         )}
       </div>
 
-      {/* Archived Weeks */}
-      <div className="card vstack" style={{gap:10}}>
-        <div className="hstack" style={{gap:8, alignItems:"baseline"}}>
-          <span className="badge">Archive</span>
-          <h3 style={{margin:0}}>Archived Weeks</h3>
+      {/* Add my log */}
+      <div className="card vstack">
+        <div className="hstack" style={{justifyContent:"space-between", alignItems:"center"}}>
+          <span className="badge">Add a log</span>
+          {myRank != null && <span className="badge">Your rank: #{myRank}</span>}
         </div>
 
-        {archived.length === 0 ? (
-          <div style={{color:"#9ca3af"}}>No archived weeks yet.</div>
+        {!user ? (
+          <p style={{color:"#9ca3af"}}>Sign in to log.</p>
+        ) : !week ? (
+          <p style={{color:"#9ca3af"}}>No active week to log to.</p>
+        ) : (
+          <form className="hstack" style={{gap:8, flexWrap:"wrap"}} onSubmit={addMyLog}>
+            <input
+              type="number"
+              step="any"
+              placeholder={`Value (${week.unit})`}
+              value={myValue}
+              onChange={e=>setMyValue(e.target.value)}
+              style={{...inputStyle, minWidth:140}}
+            />
+            <select value={myUnit} onChange={e=>setMyUnit(e.target.value)} style={{...inputStyle, minWidth:130}}>
+              {/* lock to week's unit by default, but keep options if you insist */}
+              {[week.unit, ...units.filter(u => u !== week.unit)].map(u => <option key={u} value={u}>{u}</option>)}
+            </select>
+            <input
+              placeholder="Notes (optional)"
+              value={myNotes}
+              onChange={e=>setMyNotes(e.target.value)}
+              style={{...inputStyle, minWidth:260, flex:1}}
+            />
+            <button className="btn primary" disabled={busy==="addlog"}>{busy==="addlog" ? "Saving…" : "Add log"}</button>
+          </form>
+        )}
+      </div>
+
+      {/* My logs */}
+      {user && week && (
+        <div className="card vstack">
+          <div className="hstack" style={{justifyContent:"space-between"}}>
+            <span className="badge">My logs</span>
+            <span className="badge">My total: {totals.get(user.uid) || 0} {week.unit}</span>
+          </div>
+          {logs.filter(l => l.uid === user.uid).length === 0 ? (
+            <p style={{color:"#9ca3af"}}>No logs yet.</p>
+          ) : (
+            <div style={{overflowX:"auto"}}>
+              <table style={{width:"100%", borderCollapse:"collapse"}}>
+                <thead>
+                  <tr style={{background:"#0f1a30"}}>
+                    <th style={th}>Value</th>
+                    <th style={th}>Unit</th>
+                    <th style={th}>Notes</th>
+                    <th style={th}>Updated</th>
+                    <th style={th}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {logs.filter(l => l.uid === user.uid).map(l => (
+                    <tr key={l.id} style={{borderTop:"1px solid #1f2937"}}>
+                      <td style={td}>{l.value}</td>
+                      <td style={td}>{l.unit}</td>
+                      <td style={td}>{l.notes || "—"}</td>
+                      <td style={td}>{l.updatedAt?.toDate ? l.updatedAt.toDate().toLocaleString() : "—"}</td>
+                      <td style={td}>
+                        <button
+                          className="btn"
+                          disabled={busy===`del-${l.id}`}
+                          onClick={()=>removeLog(l.id, l.uid)}
+                        >
+                          {busy===`del-${l.id}` ? "Deleting…" : "Delete"}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Leaderboard (week totals) */}
+      <div className="card vstack">
+        <div className="hstack" style={{justifyContent:"space-between"}}>
+          <span className="badge">Leaderboard (weekly totals)</span>
+          <span className="badge">Participants: {leaderboard.length}</span>
+        </div>
+
+        {(!week || leaderboard.length === 0) ? (
+          <p style={{color:"#9ca3af"}}>No logs yet.</p>
         ) : (
           <div style={{overflowX:"auto"}}>
-            <table style={table}>
+            <table style={{width:"100%", borderCollapse:"collapse"}}>
               <thead>
-                <tr>
-                  <th style={th}>Week</th>
-                  <th style={th}>Team total</th>
-                  <th style={th}>Leader</th>
-                  <th style={th}>Archived</th>
+                <tr style={{background:"#0f1a30"}}>
+                  <th style={th}>#</th>
+                  <th style={th}>Member</th>
+                  <th style={th}>Total</th>
+                  <th style={th}>Unit</th>
                 </tr>
               </thead>
               <tbody>
-                {archived.map(w => (
-                  <tr key={w.id}>
-                    <td style={td}><b>{w.title || w.id}</b></td>
-                    <td style={td}>
-                      <b>{w.teamTotal ?? 0}</b>{w.unit ? ` ${w.unit}` : ""}
-                    </td>
-                    <td style={td}>
-                      {w.leaderName ? (<><b>{w.leaderName}</b> ({w.leaderTotal ?? 0}{w.unit ? ` ${w.unit}` : ""})</>) : "—"}
-                    </td>
-                    <td style={td}>{w.archivedAt?.toDate?.()?.toLocaleString?.() || "—"}</td>
+                {leaderboard.map((r, i) => (
+                  <tr key={r.uid} style={{borderTop:"1px solid #1f2937"}}>
+                    <td style={td}><b>{i+1}</b></td>
+                    <td style={td}>{r.displayName}</td>
+                    <td style={td}>{r.total}</td>
+                    <td style={td}>{r.unit || (week?.unit || "")}</td>
                   </tr>
                 ))}
               </tbody>
@@ -439,21 +446,12 @@ export default function Weekly(){
           </div>
         )}
       </div>
-    </div>
-  )
-}
 
-/* Small stat card */
-function Stat({ label, children }){
-  return (
-    <div className="vstack" style={{
-      minWidth: 160, padding:"14px 16px", border:"1px solid #1f2937",
-      background:"#0f1a30", borderRadius:14
-    }}>
-      <div style={{ color:"#9ca3af", fontSize:12 }}>{label}</div>
-      <div style={{ fontSize:22, fontWeight:800, lineHeight:1, marginTop:4, color:"#e5e7eb" }}>
-        {children}
-      </div>
+      {err && (
+        <div className="card" style={{borderColor:"#7f1d1d", background:"#1f1315", color:"#fecaca"}}>
+          Error: {String(err.message || err)}
+        </div>
+      )}
     </div>
   )
 }
