@@ -41,6 +41,10 @@ export default function Weekly(){
   const [val, setVal] = useState("")
   const [note, setNote] = useState("")
 
+  // Manage form (create/edit week)
+  const [wTitle, setWTitle] = useState("")
+  const [wUnit, setWUnit] = useState("")
+
   // Fetch recent weeks (newest first), then pick current and archived.
   useEffect(() => {
     setErr(null)
@@ -52,13 +56,18 @@ export default function Weekly(){
     return unsub
   }, [])
 
-  // Current week is the first with active !== false (or just the first doc)
+  // Determine current week and subscribe to its logs
   useEffect(() => {
     if (!weeks.length) { setCurrent(null); setLogs([]); return }
     const active = weeks.find(w => w.active !== false) || weeks[0]
     setCurrent(active)
 
-    // subscribe to logs of current
+    // seed edit fields with current values
+    if (active) {
+      setWTitle(active.title || "")
+      setWUnit(active.unit || "")
+    }
+
     if (!active?.id) { setLogs([]); return }
     const ref = collection(db, "weeklyChallenges", active.id, "logs")
     const unsub = onSnapshot(ref, snap => {
@@ -138,6 +147,7 @@ export default function Weekly(){
         leaderName: leader?.name || null,
         leaderTotal: leader?.total || 0,
         archivedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
       })
       alert("Week archived.")
     } catch (e) {
@@ -147,29 +157,70 @@ export default function Weekly(){
     }
   }
 
-  // Owner/Admin: Create a new current week
+  // Owner/Admin: Create a brand-new active week
   async function createWeek(){
     if (!canManageWeek) return
-    const title = prompt("Week title (e.g., Week of Oct 20):", "")
-    if (!title) return
-    const unit = prompt("Unit (e.g., miles, pushups, minutes):", "")
+    const title = (wTitle || "").trim()
+    const unit = (wUnit || "").trim()
+    if (!title) { alert("Please enter a week title first."); return }
     setBusy(true)
     try {
       // Deactivate any current active week (best effort — optional)
       const currId = current?.id
       if (currId && current?.active !== false) {
-        await updateDoc(doc(db, "weeklyChallenges", currId), { active: false })
+        await updateDoc(doc(db, "weeklyChallenges", currId), { active: false, updatedAt: serverTimestamp() })
       }
-      // Create new
+      // Create new current week
       await setDoc(doc(collection(db, "weeklyChallenges")), {
-        title: title.trim(),
-        unit: (unit || "").trim(),
+        title,
+        unit,
         startDate: new Date().toISOString(),
         active: true,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       })
+      setWTitle("")
+      setWUnit("")
       alert("New week created.")
+    } catch (e) {
+      alert(e.message || String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // Owner/Admin: Save edits to the current week (title/unit)
+  async function saveWeekDetails(){
+    if (!canManageWeek || !current?.id) return
+    const title = (wTitle || "").trim()
+    const unit = (wUnit || "").trim()
+    if (!title) { alert("Title is required."); return }
+    setBusy(true)
+    try {
+      await updateDoc(doc(db, "weeklyChallenges", current.id), {
+        title,
+        unit,
+        updatedAt: serverTimestamp(),
+      })
+      alert("Week details saved.")
+    } catch (e) {
+      alert(e.message || String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // Owner/Admin: Re-open an archived week (optional)
+  async function reopenWeek(){
+    if (!canManageWeek || !current?.id) return
+    if (!confirm("Re-open this archived week as active?")) return
+    setBusy(true)
+    try {
+      await updateDoc(doc(db, "weeklyChallenges", current.id), {
+        active: true,
+        updatedAt: serverTimestamp(),
+      })
+      alert("Week re-opened.")
     } catch (e) {
       alert(e.message || String(e))
     } finally {
@@ -190,7 +241,7 @@ export default function Weekly(){
           <h2 style={{margin:0}}>Weekly Challenge</h2>
         </div>
         <div style={subtle}>
-          Log efforts for the current week. When archived, we keep team total and the top leader.
+          Create and edit the current weekly challenge; members log efforts. Archiving stores team total and leader.
         </div>
       </div>
 
@@ -200,7 +251,65 @@ export default function Weekly(){
         </div>
       )}
 
-      {/* Current Week */}
+      {/* Manage Week (Owner/Admin) */}
+      <div className="card vstack" style={{gap:10}}>
+        <div className="hstack" style={{justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:10}}>
+          <div className="hstack" style={{gap:8, alignItems:"baseline", flexWrap:"wrap"}}>
+            <span className="badge">Manage</span>
+            <h3 style={{margin:0}}>Current Week Settings</h3>
+          </div>
+          {canManageWeek && current && (
+            <div className="hstack" style={{gap:8, flexWrap:"wrap"}}>
+              {current.active === false ? (
+                <button className="btn" onClick={reopenWeek} disabled={busy}>Re-open</button>
+              ) : (
+                <button className="btn" onClick={archiveWeek} disabled={busy}>
+                  {busy ? "Working…" : "Archive week"}
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
+        {canManageWeek ? (
+          <>
+            <div className="hstack" style={{gap:8, flexWrap:"wrap"}}>
+              <input
+                style={{...input, flex:1, minWidth:220}}
+                value={wTitle}
+                onChange={e=>setWTitle(e.target.value)}
+                placeholder="Week title (e.g., Week of Oct 20)"
+              />
+              <input
+                style={{...input, minWidth:160}}
+                value={wUnit}
+                onChange={e=>setWUnit(e.target.value)}
+                placeholder="Unit (miles, pushups, minutes...)"
+              />
+            </div>
+            <div className="hstack" style={{gap:8, flexWrap:"wrap"}}>
+              {current ? (
+                <>
+                  <button className="btn" onClick={saveWeekDetails} disabled={busy}>
+                    Save week details
+                  </button>
+                  <button className="btn" onClick={createWeek} disabled={busy}>
+                    New week
+                  </button>
+                </>
+              ) : (
+                <button className="btn" onClick={createWeek} disabled={busy}>
+                  Create current week
+                </button>
+              )}
+            </div>
+          </>
+        ) : (
+          <div style={{color:"#9ca3af"}}>Only owner/admin can manage week settings.</div>
+        )}
+      </div>
+
+      {/* Current Week view */}
       <div className="card vstack" style={{gap:10}}>
         <div className="hstack" style={{justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:10}}>
           <div className="vstack" style={{gap:2}}>
@@ -211,14 +320,6 @@ export default function Weekly(){
               {current && current.active === false && <span className="badge">archived</span>}
             </div>
           </div>
-          {canManageWeek && (
-            <div className="hstack" style={{gap:8, flexWrap:"wrap"}}>
-              <button className="btn" onClick={createWeek} disabled={busy}>New week</button>
-              <button className="btn" onClick={archiveWeek} disabled={busy || !current || current.active === false}>
-                {busy ? "Working…" : "Archive week"}
-              </button>
-            </div>
-          )}
         </div>
 
         {!current ? (
