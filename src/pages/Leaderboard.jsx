@@ -31,14 +31,14 @@ export default function Leaderboard(){
   const [rows, setRows] = useState([])
   const [standardIds, setStandardIds] = useState([])
 
-  // owner editor for the curated list
+  // Admin editor for curated list
   const [editStr, setEditStr] = useState("")
   const idsPreview = useMemo(
     () => editStr.split(",").map(s => s.trim()).filter(Boolean),
     [editStr]
   )
 
-  // Profiles (for quick holder pick) — loaded on demand
+  // Profiles for quick “Pick holder”
   const [profiles, setProfiles] = useState([])
   const [profilesLoaded, setProfilesLoaded] = useState(false)
   async function ensureProfiles(){
@@ -55,7 +55,7 @@ export default function Leaderboard(){
     } catch {}
   }
 
-  // Load /settings/records and fetch only those standards
+  // Load curated list & fetch those standards + current record
   async function loadRecordsSet(){
     if (loading) return
     if (!user) { setErr({ code:"permission-denied", message:"Sign in required" }); setBusy(false); return }
@@ -128,7 +128,7 @@ export default function Leaderboard(){
     }
   }
 
-  // Per-card edit state
+  // inline record edit state
   const [editId, setEditId] = useState(null)
   const [form, setForm] = useState({ value: "", unit: "", holderName: "", notes: "" })
 
@@ -141,6 +141,8 @@ export default function Leaderboard(){
       notes: r.notes || ""
     })
     ensureProfiles()
+    const el = document.getElementById(r.id)
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" })
   }
   function cancelEdit(){ setEditId(null) }
 
@@ -175,6 +177,7 @@ export default function Leaderboard(){
     }
   }
 
+  // helper to update curated list quickly
   function addId(id){
     const next = new Set(idsPreview)
     next.add(id)
@@ -185,25 +188,38 @@ export default function Leaderboard(){
     setEditStr(next.join(", "))
   }
 
+  // optional: quick add from all standards
+  const [allStd, setAllStd] = useState([])
+  useEffect(() => {
+    async function loadAll(){
+      try {
+        const qy = query(collection(db, "standards"), orderBy("title"))
+        const snap = await getDocs(qy)
+        setAllStd(snap.docs.map(d => ({ id: d.id, title: (d.data()?.title || d.id).toString() })))
+      } catch {}
+    }
+    if (canManage) loadAll()
+  }, [canManage])
+
   return (
     <div className="container vstack" style={{gap:12}}>
       {/* Header */}
       <div className="card vstack" style={{gap:6}}>
         <div className="hstack" style={{gap:8, alignItems:"baseline", flexWrap:"wrap"}}>
-          <span className="badge">Records</span>
+          <span className="badge">Leaderboard</span>
           <h2 style={{margin:0}}>Featured Records</h2>
         </div>
         <div style={subtle}>
-          This page shows a single curated set of standards. {canManage ? "Owner/Admin can edit the list and set records below." : ""}
+          This page shows a curated set of standards. {canManage ? "Owner/Admin can edit the list and update each record below." : ""}
         </div>
       </div>
 
-      {/* Admin: choose which standards appear */}
+      {/* Manage which standards appear */}
       {canManage && (
         <div className="card vstack" style={{gap:10}}>
           <div className="hstack" style={{gap:8, alignItems:"baseline", flexWrap:"wrap"}}>
             <span className="badge">Manage</span>
-            <h3 style={{margin:0}}>Which standards are in Records?</h3>
+            <h3 style={{margin:0}}>Which standards are in Leaderboard?</h3>
           </div>
 
           <div className="vstack" style={{gap:6}}>
@@ -222,12 +238,31 @@ export default function Leaderboard(){
             </div>
           </div>
 
-          {/* Quick add from all standards (optional helper) */}
-          <QuickStandards canManage={canManage} addId={addId} removeId={removeId} idsPreview={idsPreview} />
+          {allStd.length > 0 && (
+            <div className="vstack" style={{gap:6}}>
+              <div style={subtle}>Quick add from Standards</div>
+              <div className="hstack" style={{gap:8, flexWrap:"wrap"}}>
+                {allStd.map(s => {
+                  const active = idsPreview.includes(s.id)
+                  return (
+                    <button
+                      key={s.id}
+                      className="btn"
+                      onClick={() => active ? removeId(s.id) : addId(s.id)}
+                      style={{ opacity: active ? 0.6 : 1 }}
+                      title={s.id}
+                    >
+                      {active ? "✓ " : ""}{s.title}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
-      {/* Body */}
+      {/* Content */}
       {busy ? (
         <div className="card">Loading…</div>
       ) : err ? (
@@ -239,8 +274,8 @@ export default function Leaderboard(){
       ) : standardIds.length === 0 ? (
         <div className="card">
           {canManage
-            ? "No Records set yet. Add standard IDs above and Save."
-            : "No Records have been set yet. Please check back later."}
+            ? "No Leaderboard set yet. Add standard IDs above and Save."
+            : "No records have been set yet. Please check back later."}
         </div>
       ) : rows.length === 0 ? (
         <div className="card">No records found for the selected standards.</div>
@@ -251,7 +286,7 @@ export default function Leaderboard(){
           gridTemplateColumns:"repeat(auto-fit, minmax(280px, 1fr))"
         }}>
           {rows.map(r => (
-            <div key={r.id} style={card}>
+            <div key={r.id} id={r.id} style={card}>
               <div className="vstack" style={{gap:8}}>
                 <div className="hstack" style={{justifyContent:"space-between", alignItems:"baseline", gap:8, flexWrap:"wrap"}}>
                   <div style={{fontWeight:800}}>{r.title}</div>
@@ -301,46 +336,6 @@ export default function Leaderboard(){
           ))}
         </div>
       )}
-    </div>
-  )
-}
-
-/* ===== Small components ===== */
-
-function QuickStandards({ canManage, addId, removeId, idsPreview }){
-  const [allStd, setAllStd] = useState([])
-  useEffect(() => {
-    async function loadAll(){
-      try {
-        const qy = query(collection(db, "standards"), orderBy("title"))
-        const snap = await getDocs(qy)
-        setAllStd(snap.docs.map(d => ({ id: d.id, title: (d.data()?.title || d.id).toString() })))
-      } catch {}
-    }
-    if (canManage) loadAll()
-  }, [canManage])
-
-  if (!canManage || allStd.length === 0) return null
-
-  return (
-    <div className="vstack" style={{gap:6}}>
-      <div style={subtle}>Quick add from Standards</div>
-      <div className="hstack" style={{gap:8, flexWrap:"wrap"}}>
-        {allStd.map(s => {
-          const active = idsPreview.includes(s.id)
-          return (
-            <button
-              key={s.id}
-              className="btn"
-              onClick={() => active ? removeId(s.id) : addId(s.id)}
-              style={{ opacity: active ? 0.6 : 1 }}
-              title={s.id}
-            >
-              {active ? "✓ " : ""}{s.title}
-            </button>
-          )
-        })}
-      </div>
     </div>
   )
 }
