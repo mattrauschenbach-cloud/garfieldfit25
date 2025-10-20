@@ -4,10 +4,10 @@ import { db } from "../lib/firebase"
 import useAuth from "../lib/auth"
 import {
   collection,
+  deleteDoc,
   doc,
   getDoc,
   getDocs,
-  limit,
   orderBy,
   query,
   serverTimestamp,
@@ -20,87 +20,81 @@ const input = {
   background:"#0b1426", color:"#e5e7eb", border:"1px solid #1f2937",
   borderRadius:10, padding:"10px 12px"
 }
-const btnGhost = { ...input, background:"transparent", cursor:"pointer" }
+
+const TIER_OPTIONS = [
+  { value: "committed", label: "Committed" },
+  { value: "developmental", label: "Developmental" },
+  { value: "advanced", label: "Advanced" },
+  { value: "elite", label: "Elite" },
+]
+const CAT_OPTIONS = [
+  { value: "strength", label: "Strength" },
+  { value: "conditioning", label: "Conditioning" },
+  { value: "other", label: "Other" },
+]
+
+// simple slug from title
+function slugify(s=""){
+  return s.toLowerCase()
+    .replace(/&/g, "and")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)+/g, "")
+    .slice(0, 60)
+}
 
 export default function Leaderboard(){
-  const { user, loading, isOwner, isAdmin, profile } = useAuth()
-  const canManage = isOwner || isAdmin
+  const { user, loading, isOwner, profile } = useAuth()
+  const canManage = !!isOwner
 
   const [busy, setBusy] = useState(true)
   const [err, setErr] = useState(null)
   const [rows, setRows] = useState([])
-  const [standardIds, setStandardIds] = useState([])
 
-  // Admin editor for curated list
-  const [editStr, setEditStr] = useState("")
-  const idsPreview = useMemo(
-    () => editStr.split(",").map(s => s.trim()).filter(Boolean),
-    [editStr]
-  )
+  // filters / search
+  const [qText, setQText] = useState("")
+  const [tier, setTier] = useState("all")
+  const [cat, setCat] = useState("all")
 
-  // Profiles for quick “Pick holder”
-  const [profiles, setProfiles] = useState([])
-  const [profilesLoaded, setProfilesLoaded] = useState(false)
-  async function ensureProfiles(){
-    if (profilesLoaded || !canManage) return
-    try {
-      const qy = query(collection(db, "profiles"), orderBy("displayName"), limit(100))
-      const snap = await getDocs(qy)
-      setProfiles(snap.docs.map(d => ({
-        uid: d.id,
-        displayName: (d.data()?.displayName || d.id).toString(),
-        tier: (d.data()?.tier || "").toString()
-      })))
-      setProfilesLoaded(true)
-    } catch {}
-  }
+  // edit/add form state
+  const [editingId, setEditingId] = useState(null) // null = add new
+  const [form, setForm] = useState({
+    title: "",
+    tier: "committed",
+    category: "strength",
+    unit: "",
+    value: "",
+    holderName: "",
+    notes: ""
+  })
 
-  // Load curated list & fetch those standards + current record
-  async function loadRecordsSet(){
+  useEffect(() => { load() }, [loading, user])
+
+  async function load(){
     if (loading) return
-    if (!user) { setErr({ code:"permission-denied", message:"Sign in required" }); setBusy(false); return }
-
+    if (!user) { setBusy(false); setRows([]); return }
     setBusy(true); setErr(null)
     try {
-      const setRef = doc(db, "settings", "records")
-      const setSnap = await getDoc(setRef)
-      let ids = []
-      if (setSnap.exists()) {
-        const data = setSnap.data() || {}
-        ids = Array.isArray(data.standardIds) ? data.standardIds.map(x => String(x)) : []
-      }
-
-      setStandardIds(ids)
-      setEditStr(ids.join(", "))
-
+      // load all standards ordered by title (no composite index required)
+      const qy = query(collection(db, "standards"), orderBy("title"))
+      const snap = await getDocs(qy)
       const out = []
-      for (const id of ids) {
-        const stdRef = doc(db, "standards", id)
-        const stdSnap = await getDoc(stdRef)
-        if (!stdSnap.exists()) {
-          out.push({ id, title: id, missing: true })
-          continue
-        }
-        const sd = stdSnap.data() || {}
-
-        const recRef = doc(db, "standards", id, "record", "current")
+      for (const d of snap.docs) {
+        const sdata = d.data() || {}
+        const recRef = doc(db, "standards", d.id, "record", "current")
         const recSnap = await getDoc(recRef)
         const rec = recSnap.exists() ? recSnap.data() : null
-
         out.push({
-          id,
-          title: (sd.title || id).toString(),
-          tier: (sd.tier || "").toString(),
-          category: (sd.category || "").toString(),
-          unit: rec?.unit || sd.unit || "",
+          id: d.id,
+          title: (sdata.title || d.id).toString(),
+          tier: (sdata.tier || "").toString(),
+          category: (sdata.category || "").toString(),
+          unit: rec?.unit || sdata.unit || "",
           value: rec?.value ?? null,
           holderName: rec?.holderName || "",
           notes: rec?.notes || "",
           updatedAt: rec?.updatedAt?.toDate?.()?.toLocaleString?.() || "",
-          missing: false,
         })
       }
-
       setRows(out)
     } catch (e) {
       setErr(e)
@@ -108,68 +102,75 @@ export default function Leaderboard(){
       setBusy(false)
     }
   }
-  useEffect(() => { loadRecordsSet() }, [loading, user])
 
-  async function saveRecordsSet(){
-    if (!canManage) return
-    const ids = idsPreview
-    setBusy(true)
-    try {
-      await setDoc(doc(db, "settings", "records"), {
-        standardIds: ids,
-        updatedAt: serverTimestamp()
-      }, { merge: true })
-      setStandardIds(ids)
-      await loadRecordsSet()
-    } catch (e) {
-      alert(e.message || String(e))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  // inline record edit state
-  const [editId, setEditId] = useState(null)
-  const [form, setForm] = useState({ value: "", unit: "", holderName: "", notes: "" })
-
-  function beginEdit(r){
-    setEditId(r.id)
+  function startAdd(){
+    setEditingId(null)
     setForm({
-      value: r.value ?? "",
+      title: "",
+      tier: "committed",
+      category: "strength",
+      unit: "",
+      value: "",
+      holderName: "",
+      notes: ""
+    })
+    window.scrollTo({ top: 0, behavior: "smooth" })
+  }
+  function startEdit(r){
+    setEditingId(r.id)
+    setForm({
+      title: r.title || r.id,
+      tier: r.tier || "committed",
+      category: r.category || "strength",
       unit: r.unit || "",
+      value: r.value ?? "",
       holderName: r.holderName || "",
       notes: r.notes || ""
     })
-    ensureProfiles()
     const el = document.getElementById(r.id)
-    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" })
+    if (el) el.scrollIntoView({ behavior:"smooth", block:"center" })
   }
-  function cancelEdit(){ setEditId(null) }
 
-  async function saveRecord(standardId){
-    if (!canManage || !standardId) return
+  async function save(){
+    if (!canManage) return
+    const title = (form.title || "").trim()
+    if (!title) { alert("Title is required."); return }
+
+    const id = editingId || slugify(title)
+    if (!id) { alert("Could not create an id from the title."); return }
+
     const valueNum = form.value === "" ? null : Number(form.value)
     if (form.value !== "" && !Number.isFinite(valueNum)) {
       alert("Record value must be a number (or leave blank).")
       return
     }
+
     setBusy(true)
     try {
-      await setDoc(
-        doc(db, "standards", standardId, "record", "current"),
-        {
-          value: valueNum,
-          unit: (form.unit || "").trim(),
-          holderName: (form.holderName || "").trim(),
-          notes: (form.notes || "").trim(),
-          updatedAt: serverTimestamp(),
-          verifiedByUid: user?.uid || null,
-          verifiedByName: profile?.displayName || user?.email || "admin"
-        },
-        { merge: true }
-      )
-      setEditId(null)
-      await loadRecordsSet()
+      // ensure standard exists / update its basic fields
+      await setDoc(doc(db, "standards", id), {
+        title,
+        tier: form.tier || "committed",
+        category: form.category || "strength",
+        unit: (form.unit || "").trim(),
+        updatedAt: serverTimestamp(),
+        updatedByUid: user?.uid || null
+      }, { merge: true })
+
+      // set/update the record/current
+      await setDoc(doc(db, "standards", id, "record", "current"), {
+        value: valueNum,
+        unit: (form.unit || "").trim(),
+        holderName: (form.holderName || "").trim(),
+        notes: (form.notes || "").trim(),
+        updatedAt: serverTimestamp(),
+        verifiedByUid: user?.uid || null,
+        verifiedByName: profile?.displayName || user?.email || "owner"
+      }, { merge: true })
+
+      await load()
+      setEditingId(id) // remain on that item
+      alert("Saved.")
     } catch (e) {
       alert(e.message || String(e))
     } finally {
@@ -177,29 +178,35 @@ export default function Leaderboard(){
     }
   }
 
-  // helper to update curated list quickly
-  function addId(id){
-    const next = new Set(idsPreview)
-    next.add(id)
-    setEditStr(Array.from(next).join(", "))
-  }
-  function removeId(id){
-    const next = idsPreview.filter(x => x !== id)
-    setEditStr(next.join(", "))
+  async function remove(id){
+    if (!canManage || !id) return
+    if (!confirm("Delete this standard and its record? (This deletes the standard doc but not any unrelated data.)")) return
+    setBusy(true)
+    try {
+      await deleteDoc(doc(db, "standards", id))
+      await load()
+      if (editingId === id) startAdd()
+    } catch (e) {
+      alert(e.message || String(e))
+    } finally {
+      setBusy(false)
+    }
   }
 
-  // optional: quick add from all standards
-  const [allStd, setAllStd] = useState([])
-  useEffect(() => {
-    async function loadAll(){
-      try {
-        const qy = query(collection(db, "standards"), orderBy("title"))
-        const snap = await getDocs(qy)
-        setAllStd(snap.docs.map(d => ({ id: d.id, title: (d.data()?.title || d.id).toString() })))
-      } catch {}
-    }
-    if (canManage) loadAll()
-  }, [canManage])
+  const filtered = useMemo(() => {
+    const t = qText.trim().toLowerCase()
+    return rows.filter(r => {
+      if (tier !== "all" && (r.tier || "") !== tier) return false
+      if (cat !== "all" && (r.category || "") !== cat) return false
+      if (!t) return true
+      return (
+        (r.title || "").toLowerCase().includes(t) ||
+        (r.category || "").toLowerCase().includes(t) ||
+        (r.tier || "").toLowerCase().includes(t) ||
+        (r.holderName || "").toLowerCase().includes(t)
+      )
+    })
+  }, [rows, qText, tier, cat])
 
   return (
     <div className="container vstack" style={{gap:12}}>
@@ -207,212 +214,176 @@ export default function Leaderboard(){
       <div className="card vstack" style={{gap:6}}>
         <div className="hstack" style={{gap:8, alignItems:"baseline", flexWrap:"wrap"}}>
           <span className="badge">Leaderboard</span>
-          <h2 style={{margin:0}}>Featured Records</h2>
+          <h2 style={{margin:0}}>Records</h2>
         </div>
         <div style={subtle}>
-          This page shows a curated set of standards. {canManage ? "Owner/Admin can edit the list and update each record below." : ""}
+          View top results. {canManage ? "As owner, add or edit records directly here." : ""}
         </div>
       </div>
 
-      {/* Manage which standards appear */}
+      {/* Owner editor (Add/Edit) */}
       {canManage && (
         <div className="card vstack" style={{gap:10}}>
-          <div className="hstack" style={{gap:8, alignItems:"baseline", flexWrap:"wrap"}}>
-            <span className="badge">Manage</span>
-            <h3 style={{margin:0}}>Which standards are in Leaderboard?</h3>
-          </div>
-
-          <div className="vstack" style={{gap:6}}>
-            <label style={subtle}>Standard IDs (comma-separated)</label>
-            <input
-              style={{...input, width:"100%"}}
-              value={editStr}
-              onChange={e=>setEditStr(e.target.value)}
-              placeholder="deadlift, bench-press, mile-run …"
-            />
-            <div className="hstack" style={{gap:8, flexWrap:"wrap"}}>
-              <button className="btn" onClick={saveRecordsSet} disabled={busy}>
-                {busy ? "Saving…" : "Save list"}
-              </button>
-              <button className="btn" onClick={loadRecordsSet} disabled={busy}>Refresh</button>
+          <div className="hstack" style={{gap:8, alignItems:"baseline", justifyContent:"space-between", flexWrap:"wrap"}}>
+            <div className="hstack" style={{gap:8, alignItems:"baseline"}}>
+              <span className="badge">Editor</span>
+              <h3 style={{margin:0}}>{editingId ? "Edit Record" : "Add Record"}</h3>
+              {editingId && <span style={subtle}>ID: <code>{editingId}</code></span>}
+            </div>
+            <div className="hstack" style={{gap:8}}>
+              <button className="btn" onClick={startAdd} disabled={busy}>New</button>
+              <button className="btn" onClick={save} disabled={busy}>{busy ? "Saving…" : "Save"}</button>
             </div>
           </div>
 
-          {allStd.length > 0 && (
-            <div className="vstack" style={{gap:6}}>
-              <div style={subtle}>Quick add from Standards</div>
-              <div className="hstack" style={{gap:8, flexWrap:"wrap"}}>
-                {allStd.map(s => {
-                  const active = idsPreview.includes(s.id)
-                  return (
-                    <button
-                      key={s.id}
-                      className="btn"
-                      onClick={() => active ? removeId(s.id) : addId(s.id)}
-                      style={{ opacity: active ? 0.6 : 1 }}
-                      title={s.id}
-                    >
-                      {active ? "✓ " : ""}{s.title}
-                    </button>
-                  )
-                })}
+          <div className="vstack" style={{gap:10}}>
+            <div className="hstack" style={{gap:8, flexWrap:"wrap"}}>
+              <div className="vstack" style={{gap:6, flex:2, minWidth:220}}>
+                <label style={subtle}>Title</label>
+                <input
+                  style={{...input, width:"100%"}}
+                  value={form.title}
+                  onChange={e=>setForm(f=>({...f, title: e.target.value}))}
+                  placeholder="Deadlift, Mile Run…"
+                />
+              </div>
+              <div className="vstack" style={{gap:6, minWidth:180}}>
+                <label style={subtle}>Tier</label>
+                <select
+                  style={input}
+                  value={form.tier}
+                  onChange={e=>setForm(f=>({...f, tier: e.target.value}))}
+                >
+                  {TIER_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              </div>
+              <div className="vstack" style={{gap:6, minWidth:180}}>
+                <label style={subtle}>Category</label>
+                <select
+                  style={input}
+                  value={form.category}
+                  onChange={e=>setForm(f=>({...f, category: e.target.value}))}
+                >
+                  {CAT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
               </div>
             </div>
-          )}
+
+            <div className="hstack" style={{gap:8, flexWrap:"wrap"}}>
+              <div className="vstack" style={{gap:6, minWidth:140}}>
+                <label style={subtle}>Value</label>
+                <input
+                  style={input}
+                  inputMode="decimal"
+                  value={form.value}
+                  onChange={e=>setForm(f=>({...f, value: e.target.value}))}
+                  placeholder="e.g., 405"
+                />
+              </div>
+              <div className="vstack" style={{gap:6, minWidth:140}}>
+                <label style={subtle}>Unit</label>
+                <input
+                  style={input}
+                  value={form.unit}
+                  onChange={e=>setForm(f=>({...f, unit: e.target.value}))}
+                  placeholder="lb, reps, sec…"
+                />
+              </div>
+              <div className="vstack" style={{gap:6, flex:1, minWidth:200}}>
+                <label style={subtle}>Holder</label>
+                <input
+                  style={input}
+                  value={form.holderName}
+                  onChange={e=>setForm(f=>({...f, holderName: e.target.value}))}
+                  placeholder="Name of record holder"
+                />
+              </div>
+            </div>
+
+            <div className="vstack" style={{gap:6}}>
+              <label style={subtle}>Notes (optional)</label>
+              <textarea
+                rows={2}
+                style={{...input, width:"100%", fontFamily:"inherit", lineHeight:1.4}}
+                value={form.notes}
+                onChange={e=>setForm(f=>({...f, notes: e.target.value}))}
+                placeholder="Judging details, date, conditions…"
+              />
+            </div>
+          </div>
         </div>
       )}
 
-      {/* Content */}
+      {/* Filters */}
+      <div className="card vstack" style={{gap:10}}>
+        <div className="hstack" style={{gap:8, flexWrap:"wrap"}}>
+          <input
+            style={{...input, minWidth:220, flex:1}}
+            placeholder="Search title, holder…"
+            value={qText}
+            onChange={e=>setQText(e.target.value)}
+          />
+          <select style={input} value={tier} onChange={e=>setTier(e.target.value)}>
+            <option value="all">All tiers</option>
+            {TIER_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+          <select style={input} value={cat} onChange={e=>setCat(e.target.value)}>
+            <option value="all">All categories</option>
+            {CAT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+          <button className="btn" onClick={load} disabled={busy}>{busy ? "Loading…" : "Refresh"}</button>
+        </div>
+      </div>
+
+      {/* List */}
       {busy ? (
         <div className="card">Loading…</div>
       ) : err ? (
         <div className="card" style={{borderColor:"#7f1d1d", background:"#1f1315", color:"#fecaca"}}>
-          {err.code === "permission-denied"
-            ? "You must be signed in to view records. Try refreshing after login."
-            : `Error: ${String(err.message || err)}`}
+          Error: {String(err.message || err)}
         </div>
-      ) : standardIds.length === 0 ? (
-        <div className="card">
-          {canManage
-            ? "No Leaderboard set yet. Add standard IDs above and Save."
-            : "No records have been set yet. Please check back later."}
-        </div>
-      ) : rows.length === 0 ? (
-        <div className="card">No records found for the selected standards.</div>
+      ) : filtered.length === 0 ? (
+        <div className="card" style={{color:"#9ca3af"}}>No records yet.</div>
       ) : (
         <div className="grid" style={{
           display:"grid",
           gap:12,
           gridTemplateColumns:"repeat(auto-fit, minmax(280px, 1fr))"
         }}>
-          {rows.map(r => (
+          {filtered.map(r => (
             <div key={r.id} id={r.id} style={card}>
               <div className="vstack" style={{gap:8}}>
                 <div className="hstack" style={{justifyContent:"space-between", alignItems:"baseline", gap:8, flexWrap:"wrap"}}>
                   <div style={{fontWeight:800}}>{r.title}</div>
-                  {(r.tier || r.category) && (
-                    <div className="hstack" style={{gap:6, flexWrap:"wrap"}}>
-                      {r.tier && <span className="badge">{r.tier}</span>}
-                      {r.category && <span className="badge">{r.category}</span>}
-                    </div>
-                  )}
+                  <div className="hstack" style={{gap:6, flexWrap:"wrap"}}>
+                    {r.tier && <span className="badge">{r.tier}</span>}
+                    {r.category && <span className="badge">{r.category}</span>}
+                  </div>
                 </div>
 
-                {r.missing ? (
-                  <div style={{color:"#fca5a5"}}>Standard not found: <code>{r.id}</code></div>
-                ) : editId === r.id && canManage ? (
-                  <Editor
-                    form={form}
-                    setForm={setForm}
-                    onPickClick={ensureProfiles}
-                    profiles={profiles}
-                    saving={busy}
-                    onCancel={cancelEdit}
-                    onSave={()=>saveRecord(r.id)}
-                  />
-                ) : (
-                  <>
-                    <div className="vstack" style={{gap:4}}>
-                      <div style={{fontSize:28, fontWeight:900}}>
-                        {r.value == null ? "—" : r.value}
-                        {r.unit ? <span style={{fontSize:14, color:"#9ca3af"}}> {r.unit}</span> : null}
-                      </div>
-                      <div style={subtle}>
-                        Holder: <b style={{color:"#e5e7eb"}}>{r.holderName || "—"}</b>
-                        {r.updatedAt ? <> · Updated {r.updatedAt}</> : null}
-                      </div>
-                      {r.notes ? <div style={{color:"#cbd5e1"}}>{r.notes}</div> : null}
-                    </div>
+                <div className="vstack" style={{gap:4}}>
+                  <div style={{fontSize:28, fontWeight:900}}>
+                    {r.value == null ? "—" : r.value}
+                    {r.unit ? <span style={{fontSize:14, color:"#9ca3af"}}> {r.unit}</span> : null}
+                  </div>
+                  <div style={subtle}>
+                    Holder: <b style={{color:"#e5e7eb"}}>{r.holderName || "—"}</b>
+                    {r.updatedAt ? <> · Updated {r.updatedAt}</> : null}
+                  </div>
+                  {r.notes ? <div style={{color:"#cbd5e1"}}>{r.notes}</div> : null}
+                </div>
 
-                    {canManage && (
-                      <div className="hstack" style={{gap:8, flexWrap:"wrap"}}>
-                        <button className="btn" onClick={()=>beginEdit(r)}>Edit</button>
-                      </div>
-                    )}
-                  </>
+                {canManage && (
+                  <div className="hstack" style={{gap:8, flexWrap:"wrap"}}>
+                    <button className="btn" onClick={()=>startEdit(r)}>Edit</button>
+                    <button className="btn" onClick={()=>remove(r.id)}>Delete</button>
+                  </div>
                 )}
               </div>
             </div>
           ))}
         </div>
       )}
-    </div>
-  )
-}
-
-function Editor({ form, setForm, onPickClick, profiles, saving, onCancel, onSave }){
-  return (
-    <div className="vstack" style={{gap:10}}>
-      <div className="hstack" style={{gap:8, flexWrap:"wrap"}}>
-        <div className="vstack" style={{gap:6, flex:1, minWidth:120}}>
-          <label style={subtle}>Value</label>
-          <input
-            style={input}
-            inputMode="decimal"
-            value={form.value}
-            onChange={e => setForm(f => ({...f, value: e.target.value}))}
-            placeholder="e.g., 405"
-          />
-        </div>
-        <div className="vstack" style={{gap:6, minWidth:120}}>
-          <label style={subtle}>Unit</label>
-          <input
-            style={input}
-            value={form.unit}
-            onChange={e => setForm(f => ({...f, unit: e.target.value}))}
-            placeholder="lb, reps, sec, min…"
-          />
-        </div>
-      </div>
-
-      <div className="vstack" style={{gap:6}}>
-        <label style={subtle}>Holder name</label>
-        <div className="hstack" style={{gap:8, flexWrap:"wrap"}}>
-          <input
-            style={{...input, flex:1, minWidth:220}}
-            value={form.holderName}
-            onChange={e => setForm(f => ({...f, holderName: e.target.value}))}
-            placeholder="Type a name or pick from members"
-          />
-          <details>
-            <summary style={{...btnGhost, borderRadius:10, padding:"10px 12px"}} onClick={onPickClick}>
-              Pick holder
-            </summary>
-            <div style={{background:"#0b1426", border:"1px solid #1f2937", borderRadius:10, padding:10, marginTop:8, maxHeight:220, overflowY:"auto", minWidth:260}}>
-              {profiles.length === 0 ? (
-                <div style={subtle}>No profiles loaded yet.</div>
-              ) : (
-                profiles.map(p => (
-                  <div key={p.uid}
-                    onClick={()=>setForm(f=>({...f, holderName: p.displayName}))}
-                    style={{padding:"6px 8px", cursor:"pointer", borderRadius:8}}
-                    className="hover"
-                    title={p.uid}
-                  >
-                    {p.displayName} {p.tier ? <span style={{color:"#9ca3af"}}>· {p.tier}</span> : null}
-                  </div>
-                ))
-              )}
-            </div>
-          </details>
-        </div>
-      </div>
-
-      <div className="vstack" style={{gap:6}}>
-        <label style={subtle}>Notes (optional)</label>
-        <textarea
-          rows={3}
-          style={{...input, fontFamily:"inherit", lineHeight:1.4}}
-          value={form.notes}
-          onChange={e => setForm(f => ({...f, notes: e.target.value}))}
-          placeholder="Judged on …, depth to parallel, strict form, etc."
-        />
-      </div>
-
-      <div className="hstack" style={{gap:8, flexWrap:"wrap"}}>
-        <button className="btn" onClick={onSave} disabled={saving}>{saving ? "Saving…" : "Save record"}</button>
-        <button className="btn" onClick={onCancel} disabled={saving}>Cancel</button>
-      </div>
     </div>
   )
 }
