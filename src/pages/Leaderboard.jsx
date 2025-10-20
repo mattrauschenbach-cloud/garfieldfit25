@@ -31,7 +31,7 @@ export default function Leaderboard(){
   const [rows, setRows] = useState([])
   const [standardIds, setStandardIds] = useState([])
 
-  // Admin editor for the curated list
+  // owner editor for the curated list
   const [editStr, setEditStr] = useState("")
   const idsPreview = useMemo(
     () => editStr.split(",").map(s => s.trim()).filter(Boolean),
