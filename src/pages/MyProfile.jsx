@@ -1,132 +1,202 @@
 // src/pages/MyProfile.jsx
 import { useEffect, useState } from "react"
-import useAuth from "../lib/auth"
 import { db } from "../lib/firebase"
-import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore"
+import useAuth from "../lib/auth"
+import {
+  doc,
+  getDoc,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
+} from "firebase/firestore"
 
-const label = { fontSize:12, color:"#9ca3af", marginBottom:6 }
+const subtle = { color:"#9ca3af", fontSize:12 }
 const input = {
   background:"#0b1426", color:"#e5e7eb", border:"1px solid #1f2937",
-  borderRadius:10, padding:"10px 12px", width:"100%"
+  borderRadius:10, padding:"10px 12px"
 }
+const card = { background:"#0f1a30", border:"1px solid #1f2937", borderRadius:14, padding:14 }
 
-const TIER_OPTIONS = ["committed", "developmental", "advanced", "elite"]
+const ROLE_OPTIONS = ["owner","admin","mentor","member"]
+const TIER_OPTIONS = ["committed","developmental","advanced","elite"]
 
 export default function MyProfile(){
-  const { user, profile } = useAuth()
-  const [state, setState] = useState({
+  const { user, profile, loading, isOwner } = useAuth()
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState(null)
+  const [local, setLocal] = useState({
     displayName: "",
     tier: "committed",
-    photoURL: ""
+    role: "member"
   })
-  const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
-  const [err, setErr] = useState(null)
-  const [ok, setOk] = useState(false)
 
+  // load/seed profile
   useEffect(() => {
-    let alive = true
-    async function run(){
-      if (!user?.uid) return
+    async function seedIfMissing(){
+      if (!user || loading) return
       try {
-        setLoading(true)
         const ref = doc(db, "profiles", user.uid)
         const snap = await getDoc(ref)
-        const data = snap.exists() ? snap.data() : {}
-        const next = {
-          displayName: data.displayName || profile?.displayName || user.email || "",
-          tier: (data.tier || "committed").toString(),
-          photoURL: data.photoURL || ""
+        if (!snap.exists()) {
+          await setDoc(ref, {
+            displayName: user.displayName || user.email || "Member",
+            email: user.email || null,
+            tier: "committed",
+            role: "member",
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          }, { merge: true })
         }
-        if (alive) { setState(next); setErr(null) }
-      } catch (e) {
-        if (alive) setErr(e)
-      } finally {
-        if (alive) setLoading(false)
-      }
+      } catch {}
     }
-    run()
-    return () => { alive = false }
-  }, [user?.uid, profile?.displayName, user?.email])
+    seedIfMissing()
+  }, [user, loading])
 
-  async function save(){
-    if (!user?.uid) return
-    setSaving(true); setOk(false); setErr(null)
+  // sync local form from auth profile
+  useEffect(() => {
+    if (!profile) return
+    setLocal({
+      displayName: profile.displayName || "",
+      tier: profile.tier || "committed",
+      role: profile.role || "member",
+    })
+  }, [profile?.displayName, profile?.tier, profile?.role])
+
+  if (loading) return <div className="container"><div className="card">Loading…</div></div>
+  if (!user) return <div className="container"><div className="card">Please sign in to view your profile.</div></div>
+
+  async function saveBasics(){
+    setBusy(true); setErr(null)
     try {
       const ref = doc(db, "profiles", user.uid)
-      await setDoc(ref, {
-        displayName: (state.displayName || "").trim(),
-        tier: state.tier,
-        photoURL: (state.photoURL || "").trim(),
+      await updateDoc(ref, {
+        displayName: (local.displayName || "").trim(),
+        tier: local.tier,
         updatedAt: serverTimestamp()
-      }, { merge: true })
-      setOk(true)
+      })
+      alert("Saved.")
     } catch (e) {
       setErr(e)
+      alert(e.message || String(e))
     } finally {
-      setSaving(false)
+      setBusy(false)
+    }
+  }
+
+  async function setRole(nextRole){
+    if (!isOwner) return
+    setBusy(true); setErr(null)
+    try {
+      const ref = doc(db, "profiles", user.uid)
+      await updateDoc(ref, {
+        role: nextRole,
+        updatedAt: serverTimestamp()
+      })
+      setLocal(v => ({ ...v, role: nextRole }))
+    } catch (e) {
+      setErr(e)
+      alert(e.message || String(e))
+    } finally {
+      setBusy(false)
     }
   }
 
   return (
     <div className="container vstack" style={{gap:12}}>
+      {/* Header */}
       <div className="card vstack" style={{gap:6}}>
         <div className="hstack" style={{gap:8, alignItems:"baseline", flexWrap:"wrap"}}>
           <span className="badge">Profile</span>
           <h2 style={{margin:0}}>My Profile</h2>
         </div>
-        <div style={{color:"#9ca3af", fontSize:12}}>
-          Update your display name, photo, and tier. Roles are managed by the owner/admin.
+        <div style={subtle}>
+          Update your display name, tier, and (owner only) role for testing different views.
         </div>
       </div>
 
-      {loading ? (
-        <div className="card">Loading…</div>
-      ) : (
-        <div className="card vstack" style={{gap:12}}>
+      {/* Basics */}
+      <div className="card vstack" style={{gap:10}}>
+        <div className="hstack" style={{gap:8, alignItems:"baseline", justifyContent:"space-between", flexWrap:"wrap"}}>
+          <div className="hstack" style={{gap:8, alignItems:"baseline"}}>
+            <span className="badge">Basics</span>
+            <h3 style={{margin:0}}>Your Info</h3>
+          </div>
+          <button className="btn" onClick={saveBasics} disabled={busy}>{busy ? "Saving…" : "Save"}</button>
+        </div>
+
+        <div className="vstack" style={{gap:10}}>
           <div className="vstack" style={{gap:6}}>
-            <label style={label}>Display name</label>
+            <label style={subtle}>Display name</label>
             <input
               style={input}
-              value={state.displayName}
-              onChange={e => setState(s => ({...s, displayName: e.target.value}))}
+              value={local.displayName}
+              onChange={e=>setLocal(s=>({...s, displayName: e.target.value}))}
               placeholder="Your name"
             />
           </div>
 
           <div className="vstack" style={{gap:6}}>
-            <label style={label}>Photo URL (optional)</label>
-            <input
-              style={input}
-              value={state.photoURL}
-              onChange={e => setState(s => ({...s, photoURL: e.target.value}))}
-              placeholder="https://…"
-            />
-          </div>
-
-          <div className="vstack" style={{gap:6}}>
-            <label style={label}>Tier</label>
+            <label style={subtle}>Tier</label>
             <select
               style={input}
-              value={state.tier}
-              onChange={e => setState(s => ({...s, tier: e.target.value}))}
+              value={local.tier}
+              onChange={e=>setLocal(s=>({...s, tier: e.target.value}))}
             >
               {TIER_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
           </div>
 
-          <div className="hstack" style={{gap:8, flexWrap:"wrap"}}>
-            <button className="btn" onClick={save} disabled={saving}>
-              {saving ? "Saving…" : "Save changes"}
-            </button>
-            {ok && <span style={{color:"#86efac"}}>Saved!</span>}
-          </div>
-
-          {err && (
-            <div className="card" style={{borderColor:"#7f1d1d", background:"#1f1315", color:"#fecaca"}}>
-              Error: {String(err.message || err)}
+          <div className="grid" style={{display:"grid", gap:10, gridTemplateColumns:"repeat(auto-fit, minmax(220px, 1fr))"}}>
+            <div className="vstack" style={{gap:4}}>
+              <div style={subtle}>Email</div>
+              <div style={{color:"#e5e7eb"}}>{user.email || "—"}</div>
             </div>
-          )}
+            <div className="vstack" style={{gap:4}}>
+              <div style={subtle}>UID</div>
+              <div style={{color:"#9ca3af"}} title={user.uid} style={{whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis"}}>
+                {user.uid}
+              </div>
+            </div>
+            <div className="vstack" style={{gap:4}}>
+              <div style={subtle}>Current role</div>
+              <div style={{color:"#e5e7eb", fontWeight:700}}>{local.role}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Role toggle (Owner only) */}
+      <div className="card vstack" style={{gap:10}}>
+        <div className="hstack" style={{gap:8, alignItems:"baseline", justifyContent:"space-between", flexWrap:"wrap"}}>
+          <div className="hstack" style={{gap:8, alignItems:"baseline"}}>
+            <span className="badge">Role</span>
+            <h3 style={{margin:0}}>View As</h3>
+          </div>
+        </div>
+
+        {!isOwner ? (
+          <div style={subtle}>Only the <b>owner</b> can change roles. Your role is <b>{local.role}</b>.</div>
+        ) : (
+          <div className="hstack" style={{gap:8, flexWrap:"wrap"}}>
+            {ROLE_OPTIONS.map(r => (
+              <button
+                key={r}
+                className="btn"
+                onClick={()=>setRole(r)}
+                disabled={busy}
+                style={{opacity: local.role === r ? 0.7 : 1}}
+                title={`Switch your role to ${r}`}
+              >
+                {local.role === r ? "✓ " : ""}{r}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {err && (
+        <div className="card" style={{borderColor:"#7f1d1d", background:"#1f1315", color:"#fecaca"}}>
+          Error: {String(err.message || err)}
         </div>
       )}
     </div>
