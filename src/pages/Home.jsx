@@ -4,7 +4,8 @@ import { Link } from "react-router-dom"
 import useAuth from "../lib/auth"
 import { db } from "../lib/firebase"
 import {
-  collection, collectionGroup, onSnapshot, orderBy, query, limit
+  collection, collectionGroup, doc, getDoc, getDocs,
+  onSnapshot, orderBy, query, limit, serverTimestamp, setDoc
 } from "firebase/firestore"
 import HomeMessages from "../components/HomeMessages"
 
@@ -28,9 +29,23 @@ const statValue = { fontSize:28, fontWeight:800, lineHeight:1, marginTop:4, colo
 
 // Progress bar styles
 const barWrap = { width:"100%", background:"#0b1426", border:"1px solid #1f2937", borderRadius:10, height:16, overflow:"hidden" }
-const barFill = (pct)=>({
-  width:`${pct}%`, height:"100%", background:"#1f6feb", transition:"width .25s ease"
-})
+const barFill = (pct)=>({ width:`${pct}%`, height:"100%", background:"#1f6feb", transition:"width .25s ease" })
+
+// Week helpers
+function isoWeekIdOf(d){
+  const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()))
+  const dayNum = date.getUTCDay() || 7
+  date.setUTCDate(date.getUTCDate() + 4 - dayNum)
+  const yearStart = new Date(Date.UTC(date.getUTCFullYear(),0,1))
+  const weekNo = Math.ceil((((date - yearStart)/86400000) + 1) / 7)
+  const ww = String(weekNo).padStart(2, "0")
+  return `${date.getUTCFullYear()}-W${ww}`
+}
+function previousIsoWeekId(){
+  const d = new Date()
+  d.setDate(d.getDate() - 7)
+  return isoWeekIdOf(d)
+}
 
 export default function Home(){
   const { user, profile } = useAuth()
@@ -62,11 +77,249 @@ export default function Home(){
       {/* Announcements / Messages (staff can post/edit) */}
       <HomeMessages />
 
+      {/* Weekly Champion (previous week, owner can edit / auto-fill) */}
+      <ChampionBanner />
+
       {/* Weekly Leaders (current week) */}
       <WeeklyLeaders />
 
       {/* My Checkoff Progress + Recent Checkoffs */}
-      <myCheckoffs />
+      <StandardsSection />
+    </div>
+  )
+}
+
+/* ===========================
+   Weekly Champion Banner
+   =========================== */
+function ChampionBanner(){
+  const { user, profile } = useAuth()
+  const [superOwner, setSuperOwner] = useState(false)
+  const ownerLike = (profile?.role === "owner") || superOwner
+
+  useEffect(() => {
+    async function checkSuper(){
+      if (!user) { setSuperOwner(false); return }
+      try {
+        const snap = await getDoc(doc(db, "settings", "owners"))
+        const uids = snap.exists() ? (snap.data()?.uids || []) : []
+        setSuperOwner(Array.isArray(uids) && uids.includes(user.uid))
+      } catch { setSuperOwner(false) }
+    }
+    checkSuper()
+  }, [user?.uid])
+
+  const [busy, setBusy] = useState(true)
+  const [champ, setChamp] = useState(null)
+  const [form, setForm] = useState({
+    weekId: previousIsoWeekId(),
+    leaderName: "",
+    leaderUid: "",
+    value: "",
+    metric: "points",
+    notes: "",
+    imageUrl: ""
+  })
+
+  useEffect(() => { loadChampion() }, [])
+  async function loadChampion(){
+    setBusy(true)
+    try {
+      const snap = await getDoc(doc(db, "settings", "champion"))
+      if (snap.exists()) {
+        const c = snap.data()
+        setChamp(c)
+        setForm(f => ({
+          ...f,
+          weekId: c.weekId || previousIsoWeekId(),
+          leaderName: c.leaderName || "",
+          leaderUid: c.leaderUid || "",
+          value: c.value ?? "",
+          metric: c.metric || "points",
+          notes: c.notes || "",
+          imageUrl: c.imageUrl || ""
+        }))
+      } else {
+        setChamp(null)
+      }
+    } finally { setBusy(false) }
+  }
+
+  async function saveChampion(){
+    if (!ownerLike) return
+    const valueNum = form.value === "" ? null : Number(form.value)
+    if (form.value !== "" && !Number.isFinite(valueNum)) { alert("Value must be a number (or blank)."); return }
+    setBusy(true)
+    try {
+      await setDoc(doc(db, "settings", "champion"), {
+        weekId: (form.weekId || "").trim(),
+        leaderName: (form.leaderName || "").trim(),
+        leaderUid: (form.leaderUid || "").trim() || null,
+        value: valueNum,
+        metric: (form.metric || "points").trim(),
+        notes: (form.notes || "").trim(),
+        imageUrl: (form.imageUrl || "").trim(),
+        updatedAt: serverTimestamp(),
+        updatedByUid: user?.uid || null,
+        updatedByName: profile?.displayName || user?.email || "owner"
+      }, { merge: true })
+      await loadChampion()
+      alert("Champion saved.")
+    } finally { setBusy(false) }
+  }
+
+  async function autofillFromWeek(){
+    if (!ownerLike) return
+    const weekId = (form.weekId || "").trim()
+    if (!weekId) { alert("Enter a week ID (e.g., 2025-W42)."); return }
+
+    setBusy(true)
+    try {
+      const logsRef = collection(db, "weeklyChallenges", weekId, "logs")
+      const snap = await getDocs(query(logsRef, orderBy("createdAt")))
+      if (snap.empty) { alert(`No logs found for ${weekId}.`); return }
+
+      const totalsByUid = new Map()
+      const nameByUid = new Map()
+      const totalsByName = new Map()
+
+      snap.forEach(d => {
+        const x = d.data() || {}
+        const v = Number(x.value) || 0
+        const uid = (x.uid || "").toString()
+        const name = (x.displayName || "").toString()
+        if (uid) {
+          totalsByUid.set(uid, (totalsByUid.get(uid) || 0) + v)
+          if (name) nameByUid.set(uid, name)
+        } else if (name) {
+          totalsByName.set(name, (totalsByName.get(name) || 0) + v)
+        }
+      })
+
+      let leaderUid = ""
+      let leaderName = ""
+      let best = -Infinity
+      for (const [uid, total] of totalsByUid.entries()) {
+        if (total > best) { best = total; leaderUid = uid; leaderName = nameByUid.get(uid) || uid }
+      }
+      if (leaderUid === "") {
+        for (const [name, total] of totalsByName.entries()) {
+          if (total > best) { best = total; leaderName = name }
+        }
+      }
+      if (best === -Infinity) { alert(`No numeric values in logs for ${weekId}.`); return }
+
+      setForm(f => ({ ...f, leaderUid, leaderName, value: String(best) }))
+      alert(`Auto-filled: ${leaderName} with ${best} ${form.metric || "points"}. Click Save.`)
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="card vstack" style={{gap:10}}>
+      <div className="hstack" style={{justifyContent:"space-between", alignItems:"baseline", flexWrap:"wrap", gap:8}}>
+        <div className="hstack" style={{gap:8, alignItems:"baseline"}}>
+          <span className="badge">Weekly</span>
+          <h3 style={{margin:0}}>Champion (previous week)</h3>
+        </div>
+        {ownerLike && (
+          <div className="hstack" style={{gap:8}}>
+            <button className="btn" onClick={autofillFromWeek} disabled={busy}>{busy ? "…" : "Auto-fill"}</button>
+            <button className="btn" onClick={saveChampion} disabled={busy}>{busy ? "Saving…" : "Save"}</button>
+          </div>
+        )}
+      </div>
+
+      {busy ? (
+        <div>Loading…</div>
+      ) : champ ? (
+        <div className="hstack" style={{gap:16, alignItems:"center", flexWrap:"wrap"}}>
+          {champ.imageUrl ? (
+            <img src={champ.imageUrl} alt="Champion" style={{width:88, height:88, objectFit:"cover", borderRadius:12, border:"1px solid #1f2937"}} />
+          ) : null}
+          <div className="vstack" style={{gap:4}}>
+            <div style={{fontSize:18, fontWeight:800}}>{champ.leaderName || "—"}</div>
+            <div style={subtle}>
+              Week: <b style={{color:"#e5e7eb"}}>{champ.weekId || "—"}</b>
+              {champ.value != null ? <> · {champ.value} {champ.metric || "points"}</> : null}
+            </div>
+            {champ.notes ? <div style={{color:"#cbd5e1"}}>{champ.notes}</div> : null}
+          </div>
+        </div>
+      ) : (
+        <div style={subtle}>No champion set yet.</div>
+      )}
+
+      {ownerLike && (
+        <div className="vstack" style={{gap:8}}>
+          <div className="grid" style={{display:"grid", gap:10, gridTemplateColumns:"repeat(auto-fit, minmax(220px, 1fr))"}}>
+            <div className="vstack" style={{gap:6}}>
+              <label style={subtle}>Week ID (YYYY-Www)</label>
+              <input
+                style={barWrap}
+                value={form.weekId}
+                onChange={e=>setForm(f=>({...f, weekId: e.target.value}))}
+                placeholder={previousIsoWeekId()}
+              />
+            </div>
+            <div className="vstack" style={{gap:6}}>
+              <label style={subtle}>Leader name</label>
+              <input
+                style={barWrap}
+                value={form.leaderName}
+                onChange={e=>setForm(f=>({...f, leaderName: e.target.value}))}
+                placeholder="e.g., Alex G."
+              />
+            </div>
+            <div className="vstack" style={{gap:6}}>
+              <label style={subtle}>Leader UID (optional)</label>
+              <input
+                style={barWrap}
+                value={form.leaderUid}
+                onChange={e=>setForm(f=>({...f, leaderUid: e.target.value}))}
+                placeholder="user uid"
+              />
+            </div>
+            <div className="vstack" style={{gap:6}}>
+              <label style={subtle}>Total value</label>
+              <input
+                style={barWrap}
+                inputMode="decimal"
+                value={form.value}
+                onChange={e=>setForm(f=>({...f, value: e.target.value}))}
+                placeholder="e.g., 320"
+              />
+            </div>
+            <div className="vstack" style={{gap:6}}>
+              <label style={subtle}>Metric</label>
+              <input
+                style={barWrap}
+                value={form.metric}
+                onChange={e=>setForm(f=>({...f, metric: e.target.value}))}
+                placeholder="points, reps…"
+              />
+            </div>
+            <div className="vstack" style={{gap:6}}>
+              <label style={subtle}>Image URL (optional)</label>
+              <input
+                style={barWrap}
+                value={form.imageUrl}
+                onChange={e=>setForm(f=>({...f, imageUrl: e.target.value}))}
+                placeholder="https://…"
+              />
+            </div>
+          </div>
+          <div className="vstack" style={{gap:6}}>
+            <label style={subtle}>Notes</label>
+            <textarea
+              rows={2}
+              style={{...barWrap, height:80, padding:10, borderRadius:10}}
+              value={form.notes}
+              onChange={e=>setForm(f=>({...f, notes: e.target.value}))}
+              placeholder="Shoutouts, tie-breakers, etc."
+            />
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -80,7 +333,6 @@ function WeeklyLeaders(){
   const [logs, setLogs] = useState([])
   const [err, setErr] = useState(null)
 
-  // Get the most recent week (by startDate desc)
   useEffect(() => {
     const qy = query(collection(db, "weeklyChallenges"), orderBy("startDate", "desc"), limit(1))
     const unsub = onSnapshot(qy, snap => {
@@ -88,20 +340,16 @@ function WeeklyLeaders(){
       if (!docSnap) { setWeek(null); setLogs([]); return }
       const w = { id: docSnap.id, ...(docSnap.data()||{}) }
       setWeek(w)
-
-      // Subscribe to its logs
       const logsRef = collection(db, "weeklyChallenges", docSnap.id, "logs")
       const unsubLogs = onSnapshot(logsRef, lsnap => {
         const arr = lsnap.docs.map(d => ({ id: d.id, ...(d.data()||{}) }))
-        setLogs(arr)
-        setErr(null)
+        setLogs(arr); setErr(null)
       }, e => setErr(e))
       return () => unsubLogs()
     }, e => setErr(e))
     return unsub
   }, [])
 
-  // Aggregate totals per member + compute my/team totals
   const { leaders, myTotal, teamTotal, unit } = useMemo(() => {
     const byUser = new Map()
     let team = 0
@@ -151,15 +399,11 @@ function WeeklyLeaders(){
         <div style={statWrap}>
           <div style={statCard}>
             <div style={statLabel}>My total</div>
-            <div style={statValue}>
-              {myTotal}{unit ? ` ${unit}` : ""}
-            </div>
+            <div style={statValue}>{myTotal}{unit ? ` ${unit}` : ""}</div>
           </div>
           <div style={statCard}>
             <div style={statLabel}>Team total</div>
-            <div style={statValue}>
-              {teamTotal}{unit ? ` ${unit}` : ""}
-            </div>
+            <div style={statValue}>{teamTotal}{unit ? ` ${unit}` : ""}</div>
           </div>
         </div>
       </div>
@@ -204,9 +448,7 @@ function WeeklyLeaders(){
 }
 
 /* ===========================
-   Standards Section
-   - My Checkoff Progress (per tier + overall)
-   - Recent Checkoffs (history feed)
+   Standards Section (progress + recent)
    =========================== */
 function StandardsSection(){
   const { user } = useAuth()
@@ -215,7 +457,6 @@ function StandardsSection(){
   const [historyErr, setHistoryErr] = useState(null)
   const [err, setErr] = useState(null)
 
-  // Fetch standards (wait for user to avoid rules race & double renders)
   useEffect(() => {
     if (!user) return
     setErr(null)
@@ -227,7 +468,6 @@ function StandardsSection(){
     return unsub
   }, [user])
 
-  // Fetch my checkoffs (wait for user.uid)
   useEffect(() => {
     if (!user?.uid) return
     setErr(null)
@@ -239,7 +479,6 @@ function StandardsSection(){
     return unsub
   }, [user?.uid])
 
-  // Compute progress by tier + overall
   const tiers = ["committed", "developmental", "advanced", "elite"]
   const progress = useMemo(() => {
     const byTierTotal = Object.fromEntries(tiers.map(t => [t, 0]))
@@ -299,9 +538,7 @@ function StandardsSection(){
             <div key={r.tier} className="vstack" style={{gap:6}}>
               <div className="hstack" style={{justifyContent:"space-between", alignItems:"baseline"}}>
                 <div style={{textTransform:"capitalize"}}>{r.tier}</div>
-                <div style={subtle}>
-                  {r.done}/{r.total} — {r.pct}%
-                </div>
+                <div style={subtle}>{r.done}/{r.total} — {r.pct}%</div>
               </div>
               <div style={barWrap}><div style={barFill(r.pct)} /></div>
             </div>
@@ -311,7 +548,6 @@ function StandardsSection(){
           )}
         </div>
 
-        {/* Friendly error only if it happens AFTER login */}
         {!!user && err?.code === "permission-denied" && (
           <div className="card" style={{borderColor:"#7f1d1d", background:"#1f1315", color:"#fecaca"}}>
             Can’t read checkoff data. If you’re logged in, ask the owner to verify Firestore rules.
@@ -319,7 +555,7 @@ function StandardsSection(){
         )}
       </div>
 
-      {/* Recent Checkoffs (kept) */}
+      {/* Recent Checkoffs */}
       <RecentCheckoffs userReady={!!user} setParentErr={setHistoryErr} />
 
       {historyErr && (
@@ -345,7 +581,6 @@ function RecentCheckoffs({ userReady, setParentErr }){
       qy,
       snap => {
         const arr = snap.docs.map(d => {
-          // path: profiles/{uid}/checkoffs/{standardId}/history/{eventId}
           const p = d.ref.path.split("/")
           const uid = p[1]
           const standardId = p[3]
