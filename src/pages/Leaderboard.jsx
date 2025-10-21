@@ -43,17 +43,37 @@ function slugify(s=""){
 }
 
 export default function Leaderboard(){
-  const { user, loading, isOwner, profile } = useAuth()
-  const canManage = !!isOwner
+  const { user, loading, profile } = useAuth()
 
-  const [busy, setBusy] = useState(true)
-  const [err, setErr] = useState(null)
-  const [rows, setRows] = useState([])
+  // --- Fix: determine owner-like locally (role === 'owner' OR super-owner list) ---
+  const [superOwner, setSuperOwner] = useState(false)
+  const ownerLike = (profile?.role === "owner") || superOwner
+
+  useEffect(() => {
+    // Optional: reflect "super owner" backstop from settings/owners.uids
+    async function checkSuper() {
+      if (!user) { setSuperOwner(false); return }
+      try {
+        const snap = await getDoc(doc(db, "settings", "owners"))
+        const uids = snap.exists() ? (snap.data()?.uids || []) : []
+        setSuperOwner(Array.isArray(uids) && uids.includes(user.uid))
+      } catch {
+        setSuperOwner(false)
+      }
+    }
+    checkSuper()
+  }, [user?.uid])
+
+  const canManage = !!ownerLike
+
+  const [busy,   setBusy] = useState(true)
+  const [err,    setErr]  = useState(null)
+  const [rows,   setRows] = useState([])
 
   // filters / search
   const [qText, setQText] = useState("")
-  const [tier, setTier] = useState("all")
-  const [cat, setCat] = useState("all")
+  const [tier,  setTier]  = useState("all")
+  const [cat,   setCat]   = useState("all")
 
   // edit/add form state
   const [editingId, setEditingId] = useState(null) // null = add new
@@ -180,7 +200,7 @@ export default function Leaderboard(){
 
   async function remove(id){
     if (!canManage || !id) return
-    if (!confirm("Delete this standard and its record? (This deletes the standard doc but not any unrelated data.)")) return
+    if (!confirm("Delete this standard and its record?")) return
     setBusy(true)
     try {
       await deleteDoc(doc(db, "standards", id))
