@@ -2,13 +2,7 @@
 import { useEffect, useState } from "react"
 import { db } from "../lib/firebase"
 import useAuth from "../lib/auth"
-import {
-  doc,
-  getDoc,
-  serverTimestamp,
-  setDoc,
-  updateDoc,
-} from "firebase/firestore"
+import { doc, getDoc, serverTimestamp, setDoc, updateDoc } from "firebase/firestore"
 
 const subtle = { color:"#9ca3af", fontSize:12 }
 const input = {
@@ -21,7 +15,12 @@ const ROLE_OPTIONS = ["owner","admin","mentor","member"]
 const TIER_OPTIONS = ["committed","developmental","advanced","elite"]
 
 export default function MyProfile(){
-  const { user, profile, loading, isOwner } = useAuth()
+  const { user, profile, loading } = useAuth()
+
+  // Treat the viewer as "owner-like" if their loaded profile says role === 'owner'
+  // (This avoids cases where useAuth.isOwner is stale or not populated yet.)
+  const ownerLike = (profile?.role === "owner")
+
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
   const [local, setLocal] = useState({
@@ -30,29 +29,27 @@ export default function MyProfile(){
     role: "member"
   })
 
-  // load/seed profile
+  // seed profile if missing
   useEffect(() => {
     async function seedIfMissing(){
       if (!user || loading) return
-      try {
-        const ref = doc(db, "profiles", user.uid)
-        const snap = await getDoc(ref)
-        if (!snap.exists()) {
-          await setDoc(ref, {
-            displayName: user.displayName || user.email || "Member",
-            email: user.email || null,
-            tier: "committed",
-            role: "member",
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp()
-          }, { merge: true })
-        }
-      } catch {}
+      const ref = doc(db, "profiles", user.uid)
+      const snap = await getDoc(ref)
+      if (!snap.exists()) {
+        await setDoc(ref, {
+          displayName: user.displayName || user.email || "Member",
+          email: user.email || null,
+          tier: "committed",
+          role: "member",
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        }, { merge: true })
+      }
     }
     seedIfMissing()
   }, [user, loading])
 
-  // sync local form from auth profile
+  // sync local form from profile
   useEffect(() => {
     if (!profile) return
     setLocal({
@@ -76,15 +73,14 @@ export default function MyProfile(){
       })
       alert("Saved.")
     } catch (e) {
-      setErr(e)
-      alert(e.message || String(e))
+      setErr(e); alert(e.message || String(e))
     } finally {
       setBusy(false)
     }
   }
 
   async function setRole(nextRole){
-    if (!isOwner) return
+    if (!ownerLike) return // UI guard; rules also enforce this
     setBusy(true); setErr(null)
     try {
       const ref = doc(db, "profiles", user.uid)
@@ -94,8 +90,7 @@ export default function MyProfile(){
       })
       setLocal(v => ({ ...v, role: nextRole }))
     } catch (e) {
-      setErr(e)
-      alert(e.message || String(e))
+      setErr(e); alert(e.message || String(e))
     } finally {
       setBusy(false)
     }
@@ -110,7 +105,7 @@ export default function MyProfile(){
           <h2 style={{margin:0}}>My Profile</h2>
         </div>
         <div style={subtle}>
-          Update your display name, tier, and (owner only) role for testing different views.
+          Update your display name, tier, and (owner only) switch roles to test different views.
         </div>
       </div>
 
@@ -121,7 +116,9 @@ export default function MyProfile(){
             <span className="badge">Basics</span>
             <h3 style={{margin:0}}>Your Info</h3>
           </div>
-          <button className="btn" onClick={saveBasics} disabled={busy}>{busy ? "Saving…" : "Save"}</button>
+          <button className="btn" onClick={saveBasics} disabled={busy}>
+            {busy ? "Saving…" : "Save"}
+          </button>
         </div>
 
         <div className="vstack" style={{gap:10}}>
@@ -153,7 +150,7 @@ export default function MyProfile(){
             </div>
             <div className="vstack" style={{gap:4}}>
               <div style={subtle}>UID</div>
-              <div style={{color:"#9ca3af"}} title={user.uid} style={{whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis"}}>
+              <div style={{color:"#9ca3af", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis"}} title={user.uid}>
                 {user.uid}
               </div>
             </div>
@@ -165,7 +162,7 @@ export default function MyProfile(){
         </div>
       </div>
 
-      {/* Role toggle (Owner only) */}
+      {/* Role toggle */}
       <div className="card vstack" style={{gap:10}}>
         <div className="hstack" style={{gap:8, alignItems:"baseline", justifyContent:"space-between", flexWrap:"wrap"}}>
           <div className="hstack" style={{gap:8, alignItems:"baseline"}}>
@@ -174,8 +171,10 @@ export default function MyProfile(){
           </div>
         </div>
 
-        {!isOwner ? (
-          <div style={subtle}>Only the <b>owner</b> can change roles. Your role is <b>{local.role}</b>.</div>
+        {!ownerLike ? (
+          <div style={subtle}>
+            Only the <b>owner</b> can change roles. Your role is <b>{local.role}</b>.
+          </div>
         ) : (
           <div className="hstack" style={{gap:8, flexWrap:"wrap"}}>
             {ROLE_OPTIONS.map(r => (
