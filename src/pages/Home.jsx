@@ -4,7 +4,7 @@ import { Link } from "react-router-dom"
 import useAuth from "../lib/auth"
 import { db } from "../lib/firebase"
 import {
-  collection, collectionGroup, doc, getDoc, getDocs,
+  collection, doc, getDoc, getDocs,
   onSnapshot, orderBy, query, limit, serverTimestamp, setDoc
 } from "firebase/firestore"
 import HomeMessages from "../components/HomeMessages"
@@ -26,10 +26,6 @@ const statCard = {
 }
 const statLabel = { color:"#9ca3af", fontSize:12 }
 const statValue = { fontSize:28, fontWeight:800, lineHeight:1, marginTop:4, color:"#e5e7eb" }
-
-// Progress bar styles
-const barWrap = { width:"100%", background:"#0b1426", border:"1px solid #1f2937", borderRadius:10, height:16, overflow:"hidden" }
-const barFill = (pct)=>({ width:`${pct}%`, height:"100%", background:"#1f6feb", transition:"width .25s ease" })
 
 // Week helpers
 function isoWeekIdOf(d){
@@ -74,7 +70,7 @@ export default function Home(){
         </div>
       </div>
 
-      {/* Announcements / Messages (staff can post/edit) */}
+      {/* Announcements / Messages */}
       <HomeMessages />
 
       {/* Weekly Champion (previous week, owner can edit / auto-fill) */}
@@ -82,9 +78,6 @@ export default function Home(){
 
       {/* Weekly Leaders (current week) */}
       <WeeklyLeaders />
-
-      {/* My Checkoff Progress + Recent Checkoffs */}
-      <StandardsSection />
     </div>
   )
 }
@@ -252,74 +245,40 @@ function ChampionBanner(){
       {ownerLike && (
         <div className="vstack" style={{gap:8}}>
           <div className="grid" style={{display:"grid", gap:10, gridTemplateColumns:"repeat(auto-fit, minmax(220px, 1fr))"}}>
-            <div className="vstack" style={{gap:6}}>
-              <label style={subtle}>Week ID (YYYY-Www)</label>
-              <input
-                style={barWrap}
-                value={form.weekId}
-                onChange={e=>setForm(f=>({...f, weekId: e.target.value}))}
-                placeholder={previousIsoWeekId()}
-              />
-            </div>
-            <div className="vstack" style={{gap:6}}>
-              <label style={subtle}>Leader name</label>
-              <input
-                style={barWrap}
-                value={form.leaderName}
-                onChange={e=>setForm(f=>({...f, leaderName: e.target.value}))}
-                placeholder="e.g., Alex G."
-              />
-            </div>
-            <div className="vstack" style={{gap:6}}>
-              <label style={subtle}>Leader UID (optional)</label>
-              <input
-                style={barWrap}
-                value={form.leaderUid}
-                onChange={e=>setForm(f=>({...f, leaderUid: e.target.value}))}
-                placeholder="user uid"
-              />
-            </div>
-            <div className="vstack" style={{gap:6}}>
-              <label style={subtle}>Total value</label>
-              <input
-                style={barWrap}
-                inputMode="decimal"
-                value={form.value}
-                onChange={e=>setForm(f=>({...f, value: e.target.value}))}
-                placeholder="e.g., 320"
-              />
-            </div>
-            <div className="vstack" style={{gap:6}}>
-              <label style={subtle}>Metric</label>
-              <input
-                style={barWrap}
-                value={form.metric}
-                onChange={e=>setForm(f=>({...f, metric: e.target.value}))}
-                placeholder="points, reps…"
-              />
-            </div>
-            <div className="vstack" style={{gap:6}}>
-              <label style={subtle}>Image URL (optional)</label>
-              <input
-                style={barWrap}
-                value={form.imageUrl}
-                onChange={e=>setForm(f=>({...f, imageUrl: e.target.value}))}
-                placeholder="https://…"
-              />
-            </div>
+            <LabeledInput label="Week ID (YYYY-Www)" value={form.weekId} onChange={v=>setForm(f=>({...f, weekId:v}))} placeholder={previousIsoWeekId()} />
+            <LabeledInput label="Leader name" value={form.leaderName} onChange={v=>setForm(f=>({...f, leaderName:v}))} placeholder="e.g., Alex G." />
+            <LabeledInput label="Leader UID (optional)" value={form.leaderUid} onChange={v=>setForm(f=>({...f, leaderUid:v}))} placeholder="user uid" />
+            <LabeledInput label="Total value" value={form.value} onChange={v=>setForm(f=>({...f, value:v}))} placeholder="e.g., 320" inputMode="decimal" />
+            <LabeledInput label="Metric" value={form.metric} onChange={v=>setForm(f=>({...f, metric:v}))} placeholder="points, reps…" />
+            <LabeledInput label="Image URL (optional)" value={form.imageUrl} onChange={v=>setForm(f=>({...f, imageUrl:v}))} placeholder="https://…" />
           </div>
           <div className="vstack" style={{gap:6}}>
             <label style={subtle}>Notes</label>
             <textarea
               rows={2}
-              style={{...barWrap, height:80, padding:10, borderRadius:10}}
+              style={{width:"100%", background:"#0b1426", border:"1px solid #1f2937", borderRadius:10, color:"#e5e7eb", padding:10}}
               value={form.notes}
-              onChange={e=>setForm(f=>({...f, notes: e.target.value}))}
+              onChange={e=>setForm(f=>({...f, notes:e.target.value}))}
               placeholder="Shoutouts, tie-breakers, etc."
             />
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+function LabeledInput({ label, value, onChange, placeholder, inputMode }){
+  return (
+    <div className="vstack" style={{gap:6}}>
+      <label style={subtle}>{label}</label>
+      <input
+        style={{width:"100%", background:"#0b1426", border:"1px solid #1f2937", borderRadius:10, color:"#e5e7eb", padding:"10px 12px"}}
+        value={value}
+        onChange={e=>onChange(e.target.value)}
+        placeholder={placeholder}
+        inputMode={inputMode}
+      />
     </div>
   )
 }
@@ -443,196 +402,6 @@ function WeeklyLeaders(){
       <div className="hstack" style={{justifyContent:"flex-end"}}>
         <Link className="btn" to="/weekly">Open Weekly</Link>
       </div>
-    </div>
-  )
-}
-
-/* ===========================
-   Standards Section (progress + recent)
-   =========================== */
-function StandardsSection(){
-  const { user } = useAuth()
-  const [standards, setStandards] = useState([])
-  const [myCheckoffs, setMyCheckoffs] = useState([])
-  const [historyErr, setHistoryErr] = useState(null)
-  const [err, setErr] = useState(null)
-
-  useEffect(() => {
-    if (!user) return
-    setErr(null)
-    const unsub = onSnapshot(
-      collection(db, "standards"),
-      snap => setStandards(snap.docs.map(d => ({ id: d.id, ...(d.data()||{}) }))),
-      e => setErr(e)
-    )
-    return unsub
-  }, [user])
-
-  useEffect(() => {
-    if (!user?.uid) return
-    setErr(null)
-    const unsub = onSnapshot(
-      collection(db, "profiles", user.uid, "checkoffs"),
-      snap => setMyCheckoffs(snap.docs.map(d => ({ id: d.id, ...(d.data()||{}) }))),
-      e => setErr(e)
-    )
-    return unsub
-  }, [user?.uid])
-
-  const tiers = ["committed", "developmental", "advanced", "elite"]
-  const progress = useMemo(() => {
-    const byTierTotal = Object.fromEntries(tiers.map(t => [t, 0]))
-    const byTierChecked = Object.fromEntries(tiers.map(t => [t, 0]))
-    const norm = (s) => (s || "").toString().trim().toLowerCase()
-
-    for (const s of standards) {
-      const t = norm(s.tier)
-      if (byTierTotal[t] != null) byTierTotal[t]++
-    }
-    const checkedSet = new Set(myCheckoffs.filter(c => c.checked).map(c => c.id))
-    for (const s of standards) {
-      const t = norm(s.tier)
-      if (byTierChecked[t] != null && checkedSet.has(s.id)) byTierChecked[t]++
-    }
-
-    const rows = tiers.map(t => {
-      const total = byTierTotal[t] || 0
-      const done = byTierChecked[t] || 0
-      const pct = total ? Math.round((done / total) * 100) : 0
-      return { tier: t, done, total, pct }
-    })
-
-    const overallTotal = standards.length
-    const overallDone = standards.filter(s => checkedSet.has(s.id)).length
-    const overallPct = overallTotal ? Math.round((overallDone / overallTotal) * 100) : 0
-
-    return { rows, overall: { done: overallDone, total: overallTotal, pct: overallPct } }
-  }, [standards, myCheckoffs])
-
-  return (
-    <div className="vstack" style={{gap:12}}>
-      {/* My Checkoff Progress */}
-      <div className="card vstack" style={{gap:10}}>
-        <div className="hstack" style={{justifyContent:"space-between", alignItems:"center"}}>
-          <div className="hstack" style={{gap:8, alignItems:"baseline", flexWrap:"wrap"}}>
-            <span className="badge">Standards</span>
-            <h3 style={{margin:0}}>My Checkoff Progress</h3>
-          </div>
-          <Link className="btn" to="/checkoffs">Open Checkoffs</Link>
-        </div>
-
-        {/* Overall */}
-        <div className="vstack" style={{gap:6}}>
-          <div className="hstack" style={{justifyContent:"space-between", alignItems:"baseline"}}>
-            <div style={{fontWeight:700}}>Overall</div>
-            <div style={subtle}>
-              {progress.overall.done}/{progress.overall.total} — {progress.overall.pct}%
-            </div>
-          </div>
-          <div style={barWrap}><div style={barFill(progress.overall.pct)} /></div>
-        </div>
-
-        {/* Per tier */}
-        <div className="vstack" style={{gap:10}}>
-          {progress.rows.map(r => (
-            <div key={r.tier} className="vstack" style={{gap:6}}>
-              <div className="hstack" style={{justifyContent:"space-between", alignItems:"baseline"}}>
-                <div style={{textTransform:"capitalize"}}>{r.tier}</div>
-                <div style={subtle}>{r.done}/{r.total} — {r.pct}%</div>
-              </div>
-              <div style={barWrap}><div style={barFill(r.pct)} /></div>
-            </div>
-          ))}
-          {progress.rows.every(r => r.total === 0) && (
-            <div style={{color:"#9ca3af"}}>No standards defined yet. Add them in <b>Standards</b>.</div>
-          )}
-        </div>
-
-        {!!user && err?.code === "permission-denied" && (
-          <div className="card" style={{borderColor:"#7f1d1d", background:"#1f1315", color:"#fecaca"}}>
-            Can’t read checkoff data. If you’re logged in, ask the owner to verify Firestore rules.
-          </div>
-        )}
-      </div>
-
-      {/* Recent Checkoffs */}
-      <RecentCheckoffs userReady={!!user} setParentErr={setHistoryErr} />
-
-      {historyErr && (
-        <div className="card" style={{borderColor:"#7f1d1d", background:"#1f1315", color:"#fecaca"}}>
-          Error: {String(historyErr.message || historyErr)}
-        </div>
-      )}
-    </div>
-  )
-}
-
-/* ===========================
-   Helper: Recent Checkoffs feed
-   =========================== */
-function RecentCheckoffs({ userReady, setParentErr }){
-  const [history, setHistory] = useState([])
-
-  useEffect(() => {
-    if (!userReady) return
-    setParentErr?.(null)
-    const qy = query(collectionGroup(db, "history"), orderBy("createdAt", "desc"), limit(8))
-    const unsub = onSnapshot(
-      qy,
-      snap => {
-        const arr = snap.docs.map(d => {
-          const p = d.ref.path.split("/")
-          const uid = p[1]
-          const standardId = p[3]
-          return { id: d.id, uid, standardId, ...(d.data()||{}) }
-        })
-        setHistory(arr)
-      },
-      e => setParentErr?.(e)
-    )
-    return unsub
-  }, [userReady, setParentErr])
-
-  return (
-    <div className="card vstack" style={{gap:8}}>
-      <div className="hstack" style={{justifyContent:"space-between", alignItems:"center"}}>
-        <div className="hstack" style={{gap:8, alignItems:"baseline", flexWrap:"wrap"}}>
-          <span className="badge">Standards</span>
-          <h3 style={{margin:0}}>Recent Checkoffs</h3>
-        </div>
-        <Link className="btn" to="/checkoffs">Open Checkoffs</Link>
-      </div>
-
-      {history.length === 0 ? (
-        <div style={{color:"#9ca3af"}}>No recent checkoffs.</div>
-      ) : (
-        <div style={{overflowX:"auto"}}>
-          <table style={table}>
-            <thead>
-              <tr>
-                <th style={th}>Member</th>
-                <th style={th}>Standard</th>
-                <th style={th}>Action</th>
-                <th style={th}>By</th>
-                <th style={th}>When</th>
-                <th style={th}>Note</th>
-              </tr>
-            </thead>
-            <tbody>
-              {history.map(h => (
-                <tr key={h.id}>
-                  <td style={td}>{h.memberName || h.uid || "—"}</td>
-                  <td style={td}>{h.standardTitle || h.standardId || "—"}</td>
-                  <td style={td}>{h.action || (h.checked ? "checked" : "updated")}</td>
-                  <td style={td}>{h.byName || h.checkedByName || "—"}</td>
-                  <td style={td}>{h.createdAt?.toDate?.()?.toLocaleString?.() || "—"}</td>
-                  <td style={td}>{h.note || h.notes || "—"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
     </div>
   )
 }
