@@ -8,7 +8,6 @@ import {
   onSnapshot, orderBy, query, limit, serverTimestamp, setDoc
 } from "firebase/firestore"
 import HomeMessages from "../components/HomeMessages"
-import AllTimeShiftTotals from "../components/AllTimeShiftTotals"
 
 // Small style helpers to match your theme
 const subtle = { color:"#9ca3af", fontSize:12 }
@@ -79,17 +78,6 @@ export default function Home(){
 
       {/* Weekly Leaders (current week) */}
       <WeeklyLeaders />
-
-      {/* All-time Shift Totals (A/B/C) */}
-      <div className="card vstack" style={{gap:10}}>
-        <div className="hstack" style={{gap:8, alignItems:"baseline", justifyContent:"space-between", flexWrap:"wrap"}}>
-          <div className="hstack" style={{gap:8, alignItems:"baseline"}}>
-            <span className="badge">All-Time</span>
-            <h3 style={{margin:0}}>Shift Totals (A/B/C)</h3>
-          </div>
-        </div>
-        <AllTimeShiftTotals />
-      </div>
     </div>
   )
 }
@@ -226,7 +214,7 @@ function ChampionBanner(){
           <span className="badge">Weekly</span>
           <h3 style={{margin:0}}>Champion (previous week)</h3>
         </div>
-        {(profile?.role === "owner" || superOwner) && (
+        {ownerLike && (
           <div className="hstack" style={{gap:8}}>
             <button className="btn" onClick={autofillFromWeek} disabled={busy}>{busy ? "…" : "Auto-fill"}</button>
             <button className="btn" onClick={saveChampion} disabled={busy}>{busy ? "Saving…" : "Save"}</button>
@@ -254,7 +242,7 @@ function ChampionBanner(){
         <div style={subtle}>No champion set yet.</div>
       )}
 
-      {(profile?.role === "owner" || superOwner) && (
+      {ownerLike && (
         <div className="vstack" style={{gap:8}}>
           <div className="grid" style={{display:"grid", gap:10, gridTemplateColumns:"repeat(auto-fit, minmax(220px, 1fr))"}}>
             <LabeledInput label="Week ID (YYYY-Www)" value={form.weekId} onChange={v=>setForm(f=>({...f, weekId:v}))} placeholder={previousIsoWeekId()} />
