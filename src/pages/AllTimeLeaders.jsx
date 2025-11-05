@@ -1,37 +1,33 @@
 import { useState, useEffect } from "react";
 import { db, auth } from "../firebase";
 import { collection, getDocs, updateDoc, doc } from "firebase/firestore";
-import { Card, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "../components/ui/card";
+import { Input } from "../components/ui/input";
+import { Button } from "../components/ui/button";
 
 export default function AllTimeLeaders() {
   const [members, setMembers] = useState([]);
   const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
-    const checkAdmin = () => {
-      const user = auth.currentUser;
-      if (user?.email === "your@email.com") setIsAdmin(true); // Replace with your admin email
-    };
-    checkAdmin();
+    // 🔒 listen for auth state and enable editing for your email
+    const unsub = auth.onAuthStateChanged((user) => {
+      setIsAdmin(user?.email === "mattrauschenbach@gmail.com");
+    });
 
     const fetchMembers = async () => {
       const snapshot = await getDocs(collection(db, "members"));
-      const list = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-      }));
+      const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
       setMembers(list);
     };
     fetchMembers();
+
+    return () => unsub();
   }, []);
 
   const handleChange = (id, field, value) => {
     setMembers(prev =>
-      prev.map(m =>
-        m.id === id ? { ...m, [field]: Number(value) || 0 } : m
-      )
+      prev.map(m => (m.id === id ? { ...m, [field]: Number(value) || 0 } : m))
     );
   };
 
@@ -45,9 +41,7 @@ export default function AllTimeLeaders() {
 
   return (
     <div className="p-6 max-w-3xl mx-auto">
-      <h1 className="text-3xl font-bold text-center mb-6">
-        🏁 All-Time Leaderboard
-      </h1>
+      <h1 className="text-3xl font-bold text-center mb-6">🏁 All-Time Leaderboard</h1>
 
       <Card className="shadow-md rounded-2xl border">
         <CardContent className="p-4 space-y-3">
@@ -61,37 +55,21 @@ export default function AllTimeLeaders() {
           </div>
 
           {members.map(m => (
-            <div
-              key={m.id}
-              className="flex items-center justify-between border-b pb-2 last:border-none"
-            >
+            <div key={m.id} className="flex items-center justify-between border-b pb-2 last:border-none">
               <span className="font-medium">{m.name}</span>
               <div className="flex gap-3 items-center">
                 {isAdmin ? (
                   <>
-                    <Input
-                      type="number"
-                      value={m.firsts || 0}
+                    <Input type="number" value={m.firsts || 0}
                       onChange={e => handleChange(m.id, "firsts", e.target.value)}
-                      className="w-14 text-center"
-                    />
-                    <Input
-                      type="number"
-                      value={m.seconds || 0}
+                      className="w-14 text-center" />
+                    <Input type="number" value={m.seconds || 0}
                       onChange={e => handleChange(m.id, "seconds", e.target.value)}
-                      className="w-14 text-center"
-                    />
-                    <Input
-                      type="number"
-                      value={m.thirds || 0}
+                      className="w-14 text-center" />
+                    <Input type="number" value={m.thirds || 0}
                       onChange={e => handleChange(m.id, "thirds", e.target.value)}
-                      className="w-14 text-center"
-                    />
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => saveChanges(m.id, m)}
-                    >
+                      className="w-14 text-center" />
+                    <Button size="sm" variant="outline" onClick={() => saveChanges(m.id, m)}>
                       Save
                     </Button>
                   </>
