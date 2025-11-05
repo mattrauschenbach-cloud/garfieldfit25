@@ -5,7 +5,6 @@ import {
   getDocs,
   updateDoc,
   doc,
-  setDoc,
   addDoc,
   deleteDoc,
 } from "firebase/firestore";
@@ -23,7 +22,7 @@ export default function AllTimeLeaders() {
     return () => unsub();
   }, []);
 
-  // ---------- load everything ----------
+  // ---------- Load All ----------
   const loadProfiles = async () => {
     const snap = await getDocs(collection(db, "profiles"));
     const list = snap.docs.map((d) => ({
@@ -42,6 +41,7 @@ export default function AllTimeLeaders() {
     setProfiles(ranked);
   };
 
+  // ---------- Editing ----------
   const handleChange = (id, field, val) => {
     setProfiles((prev) =>
       prev.map((p) =>
@@ -78,21 +78,31 @@ export default function AllTimeLeaders() {
     loadProfiles();
   };
 
-  // ---------- ui ----------
+  // ---------- Styling helpers ----------
+  const podiumColor = (i) =>
+    i === 0
+      ? "from-yellow-400 to-yellow-600 text-yellow-200"
+      : i === 1
+      ? "from-gray-300 to-gray-500 text-gray-100"
+      : "from-amber-700 to-amber-900 text-amber-200";
+
   const rankColor = (i) =>
     i === 0
-      ? "text-yellow-400 drop-shadow-[0_0_6px_gold]"
+      ? "text-yellow-400"
       : i === 1
       ? "text-gray-300"
       : i === 2
       ? "text-amber-600"
       : "text-gray-400";
 
+  // ---------- Top 3 ----------
+  const topThree = profiles.slice(0, 3);
+
   return (
     <div className="p-6 max-w-5xl mx-auto text-gray-100">
-      {/* header */}
-      <div className="text-center mb-8">
-        <h1 className="text-4xl font-extrabold text-white mb-2 drop-shadow">
+      {/* Header */}
+      <div className="text-center mb-10">
+        <h1 className="text-4xl font-extrabold text-white mb-2 drop-shadow-[0_0_8px_rgba(255,255,255,0.25)]">
           🏆 Fire Fit All-Time Leaders
         </h1>
         <p className="text-gray-400">
@@ -100,7 +110,36 @@ export default function AllTimeLeaders() {
         </p>
       </div>
 
-      {/* add new */}
+      {/* Top 3 Podium */}
+      {topThree.length > 0 && (
+        <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-10">
+          {topThree.map((p, i) => (
+            <div
+              key={p.id}
+              className={`flex flex-col items-center justify-center w-56 h-40 rounded-2xl bg-gradient-to-b ${podiumColor(
+                i
+              )} shadow-lg shadow-black/30 transform hover:scale-105 transition`}
+              style={{
+                order: i === 1 ? -1 : i === 0 ? 0 : 1,
+              }}
+            >
+              <div
+                className={`text-5xl font-extrabold ${
+                  i === 0 ? "text-yellow-200" : ""
+                }`}
+              >
+                {i === 0 ? "🥇" : i === 1 ? "🥈" : "🥉"}
+              </div>
+              <div className="text-lg font-bold">{p.name}</div>
+              <div className="text-sm opacity-80">
+                {p.total} pts ({p.firsts}-{p.seconds}-{p.thirds})
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Add new */}
       {isAdmin && (
         <div className="flex items-center gap-2 mb-6">
           <input
@@ -119,7 +158,7 @@ export default function AllTimeLeaders() {
         </div>
       )}
 
-      {/* table */}
+      {/* Table */}
       <div className="overflow-hidden rounded-xl border border-gray-700 shadow-lg">
         <div className="grid grid-cols-7 bg-[#111827] px-3 py-2 font-semibold text-gray-400 text-sm">
           <span>#</span>
