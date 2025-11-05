@@ -1,4 +1,3 @@
-// src/components/NavBar.jsx
 import { useState } from "react"
 import { Link, useLocation } from "react-router-dom"
 import useAuth from "../lib/auth"
@@ -9,7 +8,7 @@ export default function NavBar() {
   const role = profile?.role || "member"
   const [open, setOpen] = useState(false)
 
-  // close menu when navigating
+  // Close menu when navigating
   function NavLink({ to, children }) {
     const active = pathname === to
     return (
@@ -36,30 +35,19 @@ export default function NavBar() {
       position: "sticky", top: 0, zIndex: 50,
       background: "#0b1426", borderBottom: "1px solid #1f2937"
     }}>
-      {/* Simple component-scoped CSS for responsive behavior */}
       <style>{`
-        /* Layout container */
         .nav-wrap { max-width: 1100px; margin: 0 auto; padding: 10px 16px; }
         .nav-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-
-        /* Desktop nav */
         .nav-links { display: flex; align-items: center; gap: 10px; }
-
-        /* Right side (role/user/logout) */
         .nav-right { display: flex; align-items: center; gap: 10px; }
-
-        /* Mobile menu button hidden on desktop */
         .menu-btn { display: none; }
-
-        /* Mobile panel hidden by default */
         .mobile-panel { display: none; }
 
-        /* Small screens */
         @media (max-width: 640px) {
           .menu-btn { display: inline-flex; align-items: center; justify-content: center; }
-          .nav-links { display: none; }       /* hide desktop links */
+          .nav-links { display: none; }
           .mobile-panel {
-            display: block;                   /* slide-down panel */
+            display: block;
             padding: 10px 0;
             border-top: 1px solid #1f2937;
           }
@@ -80,7 +68,8 @@ export default function NavBar() {
               onClick={() => setOpen(false)}
               style={{
                 padding: "8px 12px", borderRadius: 10, border: "1px solid #1f2937",
-                textDecoration: "none", color: "#fff", background: pathname === "/" ? "#172136" : "transparent",
+                textDecoration: "none", color: "#fff",
+                background: pathname === "/" ? "#172136" : "transparent",
                 fontWeight: 700
               }}
             >
@@ -97,6 +86,7 @@ export default function NavBar() {
               <NavLink to="/checkoffs">Checkoffs</NavLink>
               <NavLink to="/weekly">Weekly</NavLink>
               <NavLink to="/leaderboard">Leaderboard</NavLink>
+              <NavLink to="/all-time-leaders">All-Time Leaders 🏆</NavLink>
               <NavLink to="/my">My Profile</NavLink>
             </nav>
           )}
@@ -108,7 +98,8 @@ export default function NavBar() {
                 <span style={{
                   display: "inline-flex", alignItems: "center", gap: 8,
                   padding: "4px 10px", borderRadius: 999,
-                  background: "#0f1a30", border: "1px solid #1f2937", color: "#e5e7eb", fontSize: 12
+                  background: "#0f1a30", border: "1px solid #1f2937",
+                  color: "#e5e7eb", fontSize: 12
                 }}>
                   <b style={{ textTransform: "uppercase" }}>{role}</b>
                   <span style={{ color: "#cbd5e1", fontSize: 12 }}>
@@ -144,7 +135,6 @@ export default function NavBar() {
                   background: "#172136", color: "#e5e7eb", cursor: "pointer"
                 }}
               >
-                {/* Simple hamburger icon */}
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor">
                   <path strokeWidth="2" strokeLinecap="round" d="M3 6h18M3 12h18M3 18h18"/>
                 </svg>
@@ -163,9 +153,10 @@ export default function NavBar() {
               <NavLink to="/checkoffs">Checkoffs</NavLink>
               <NavLink to="/weekly">Weekly</NavLink>
               <NavLink to="/leaderboard">Leaderboard</NavLink>
+              <NavLink to="/all-time-leaders">All-Time Leaders 🏆</NavLink>
               <NavLink to="/my">My Profile</NavLink>
 
-              {/* Mobile logout inside panel */}
+              {/* Mobile logout */}
               <button
                 onClick={() => { setOpen(false); signOut() }}
                 style={{
