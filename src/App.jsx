@@ -1,4 +1,3 @@
-// src/App.jsx
 import { lazy, Suspense, useEffect } from "react"
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom"
 
@@ -14,10 +13,12 @@ const Standards = lazy(() => import("./pages/Standards"))
 const Checkoffs = lazy(() => import("./pages/Checkoffs"))
 const Weekly = lazy(() => import("./pages/Weekly"))
 const Leaderboard = lazy(() => import("./pages/Leaderboard"))
+const AllTimeLeaders = lazy(() => import("./pages/AllTimeLeaders")) // ✅ NEW
 const MyProfile = lazy(() => import("./pages/MyProfile"))
 const Login = lazy(() => import("./pages/Login"))
-const Status = lazy(() => import("./pages/Status")) // keep or remove route below if you don't want it
+const Status = lazy(() => import("./pages/Status"))
 
+// --- Loading fallback ---
 function Loading() {
   return (
     <div className="container vstack" style={{ gap: 10 }}>
@@ -26,12 +27,14 @@ function Loading() {
   )
 }
 
+// --- Scroll reset on route change ---
 function ScrollToTop() {
   const { pathname } = useLocation()
   useEffect(() => { window.scrollTo(0, 0) }, [pathname])
   return null
 }
 
+// --- 404 Page ---
 function NotFound() {
   return (
     <div className="container vstack" style={{ gap: 12 }}>
@@ -39,7 +42,8 @@ function NotFound() {
         <span className="badge">404</span>
         <h2 style={{ margin: 0 }}>Page not found</h2>
         <p style={{ color: "#9ca3af" }}>
-          The page you’re looking for doesn’t exist. Head back to <a className="link" href="/">Home</a>.
+          The page you’re looking for doesn’t exist. Head back to{" "}
+          <a className="link" href="/">Home</a>.
         </p>
       </div>
     </div>
@@ -52,17 +56,17 @@ export default function App() {
       <ScrollToTop />
       <NavBar />
 
-      {/* EntryGate shows on first load / every 24h */}
+      {/* EntryGate shows on first load / every 24 h */}
       <EntryGate />
 
       <ErrorBoundary>
         <Suspense fallback={<Loading />}>
           <Routes>
-            {/* Public routes */}
+            {/* --- Public routes --- */}
             <Route path="/login" element={<Login />} />
             <Route path="/status" element={<Status />} />
 
-            {/* Private routes */}
+            {/* --- Protected routes --- */}
             <Route
               path="/"
               element={
@@ -111,6 +115,15 @@ export default function App() {
                 </ProtectedRoute>
               }
             />
+            {/* ✅ NEW All-Time Leaders route */}
+            <Route
+              path="/all-time-leaders"
+              element={
+                <ProtectedRoute>
+                  <AllTimeLeaders />
+                </ProtectedRoute>
+              }
+            />
             <Route
               path="/my"
               element={
@@ -120,10 +133,10 @@ export default function App() {
               }
             />
 
-            {/* Back-compat */}
+            {/* --- Back-compat redirect --- */}
             <Route path="/home" element={<Navigate to="/" replace />} />
 
-            {/* Catch-all */}
+            {/* --- Catch-all 404 --- */}
             <Route path="*" element={<NotFound />} />
           </Routes>
         </Suspense>
