@@ -1,16 +1,12 @@
 import { useState, useEffect } from "react";
-import { db, auth } from "../lib/firebase"; // ✅ correct path
+import { db, auth } from "../lib/firebase";
 import { collection, getDocs, updateDoc, doc } from "firebase/firestore";
-import { Card, CardContent } from "../components/ui/card";
-import { Input } from "../components/ui/input";
-import { Button } from "../components/ui/button";
 
 export default function AllTimeLeaders() {
   const [members, setMembers] = useState([]);
   const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
-    // Only allow editing for Matt
     const unsub = auth.onAuthStateChanged((user) => {
       setIsAdmin(user?.email === "mattrauschenbach@gmail.com");
     });
@@ -22,7 +18,6 @@ export default function AllTimeLeaders() {
           id: doc.id,
           ...doc.data(),
         }));
-        // ✅ Add total points & sort automatically
         const sorted = list
           .map((m) => ({
             ...m,
@@ -62,7 +57,7 @@ export default function AllTimeLeaders() {
     }
   };
 
-  // ✅ Re-sort automatically when data changes (after edit)
+  // Auto resort whenever numbers change
   useEffect(() => {
     setMembers((prev) =>
       [...prev]
@@ -72,7 +67,7 @@ export default function AllTimeLeaders() {
         }))
         .sort((a, b) => b.total - a.total)
     );
-  }, [members.length]); // run when member list updates
+  }, [members.length]);
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
@@ -80,82 +75,83 @@ export default function AllTimeLeaders() {
         🏁 All-Time Leaderboard
       </h1>
 
-      <Card className="shadow-md rounded-2xl border">
-        <CardContent className="p-4 space-y-3">
-          {/* Header row */}
-          <div className="grid grid-cols-5 text-sm font-semibold text-gray-600 border-b pb-2">
-            <span>#</span>
-            <span>Name</span>
-            <span className="text-center">🥇 1st</span>
-            <span className="text-center">🥈 2nd</span>
-            <span className="text-center">🥉 3rd</span>
+      {/* Leaderboard container */}
+      <div className="bg-[#0f172a] border border-gray-700 rounded-2xl shadow-lg p-4">
+        <div className="grid grid-cols-6 text-sm font-semibold text-gray-300 border-b border-gray-700 pb-2">
+          <span>#</span>
+          <span>Name</span>
+          <span className="text-center">🥇</span>
+          <span className="text-center">🥈</span>
+          <span className="text-center">🥉</span>
+          <span className="text-center">Points</span>
+        </div>
+
+        {members.map((m, i) => (
+          <div
+            key={m.id}
+            className="grid grid-cols-6 items-center border-b border-gray-700 py-2 last:border-none text-gray-100"
+          >
+            <span className="text-gray-400 font-semibold">{i + 1}</span>
+            <span className="font-medium flex items-center gap-1">
+              {i === 0 && "🥇"}
+              {i === 1 && "🥈"}
+              {i === 2 && "🥉"}
+              {m.name}
+            </span>
+
+            {isAdmin ? (
+              <>
+                <input
+                  type="number"
+                  value={m.firsts || 0}
+                  onChange={(e) =>
+                    handleChange(m.id, "firsts", e.target.value)
+                  }
+                  className="w-14 mx-auto text-center bg-gray-800 border border-gray-600 rounded-md p-1"
+                />
+                <input
+                  type="number"
+                  value={m.seconds || 0}
+                  onChange={(e) =>
+                    handleChange(m.id, "seconds", e.target.value)
+                  }
+                  className="w-14 mx-auto text-center bg-gray-800 border border-gray-600 rounded-md p-1"
+                />
+                <input
+                  type="number"
+                  value={m.thirds || 0}
+                  onChange={(e) =>
+                    handleChange(m.id, "thirds", e.target.value)
+                  }
+                  className="w-14 mx-auto text-center bg-gray-800 border border-gray-600 rounded-md p-1"
+                />
+              </>
+            ) : (
+              <>
+                <span className="text-center">{m.firsts || 0}</span>
+                <span className="text-center">{m.seconds || 0}</span>
+                <span className="text-center">{m.thirds || 0}</span>
+              </>
+            )}
+
+            <span className="text-center font-semibold text-yellow-400">
+              {m.total || 0}
+            </span>
+
+            {isAdmin && (
+              <button
+                onClick={() => saveChanges(m.id, m)}
+                className="col-span-6 mt-2 px-3 py-1 bg-gray-700 hover:bg-gray-600 text-sm rounded-md text-white mx-auto"
+              >
+                Save
+              </button>
+            )}
           </div>
+        ))}
+      </div>
 
-          {/* Members list */}
-          {members.map((m, i) => (
-            <div
-              key={m.id}
-              className="grid grid-cols-5 items-center border-b py-2 last:border-none"
-            >
-              <span className="font-semibold text-gray-400">{i + 1}</span>
-              <div className="font-medium flex items-center gap-1">
-                {i === 0 && "🥇"}
-                {i === 1 && "🥈"}
-                {i === 2 && "🥉"}
-                {m.name}
-              </div>
-
-              {/* Editable / read-only columns */}
-              {isAdmin ? (
-                <>
-                  <Input
-                    type="number"
-                    value={m.firsts || 0}
-                    onChange={(e) =>
-                      handleChange(m.id, "firsts", e.target.value)
-                    }
-                    className="w-14 mx-auto text-center"
-                  />
-                  <Input
-                    type="number"
-                    value={m.seconds || 0}
-                    onChange={(e) =>
-                      handleChange(m.id, "seconds", e.target.value)
-                    }
-                    className="w-14 mx-auto text-center"
-                  />
-                  <Input
-                    type="number"
-                    value={m.thirds || 0}
-                    onChange={(e) =>
-                      handleChange(m.id, "thirds", e.target.value)
-                    }
-                    className="w-14 mx-auto text-center"
-                  />
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="col-span-5 mt-2 w-fit mx-auto"
-                    onClick={() => saveChanges(m.id, m)}
-                  >
-                    Save
-                  </Button>
-                </>
-              ) : (
-                <>
-                  <span className="text-center">{m.firsts || 0}</span>
-                  <span className="text-center">{m.seconds || 0}</span>
-                  <span className="text-center">{m.thirds || 0}</span>
-                </>
-              )}
-            </div>
-          ))}
-        </CardContent>
-      </Card>
-
-      {/* ✅ Totals footer */}
       <div className="text-center mt-6 text-sm text-gray-500">
-        Points = 🥇×3 + 🥈×2 + 🥉×1 — sorted automatically
+        Points = 🥇×3 + 🥈×2 + 🥉×1 — auto-ranked
       </div>
     </div>
   );
